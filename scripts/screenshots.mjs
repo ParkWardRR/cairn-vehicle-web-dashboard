@@ -33,7 +33,7 @@ await ctx.route('**/basemaps.cartocdn.com/**', async (route) => {
   const m = url.match(/\/(\d+)\/(\d+)\/(\d+)(?:@2x)?\.png/)
   if (!m) return route.abort()
   const res = await ctx.request.get(`https://tile.openstreetmap.org/${m[1]}/${m[2]}/${m[3]}.png`, {
-    headers: { 'User-Agent': 'cairn-readme-screenshots (github.com/ParkWardRR/Cairn)' },
+    headers: { 'User-Agent': 'cairn-readme-screenshots (github.com/ParkWardRR/cairn-driving-log-selfhosted)' },
   })
   await route.fulfill({ response: res })
 })

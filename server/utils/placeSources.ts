@@ -3,7 +3,7 @@ import { distM } from './placeLabel'
 
 // Parsers (pure, unit-tested) and thin fetch wrappers for the external sources.
 
-export const USER_AGENT = 'Cairn/1.0 (+https://github.com/ParkWardRR/Cairn; personal vehicle journal)'
+export const USER_AGENT = 'Cairn/1.0 (+https://github.com/ParkWardRR/cairn-driving-log-selfhosted; personal vehicle journal)'
 
 // ---------- OpenStreetMap via Overpass ----------
 
