@@ -57,7 +57,7 @@ function formatDuration(seconds: number | null): string {
 
 <template>
   <div>
-    <LayoutPageHeader title="Trips" subtitle="Browse all recorded trips">
+    <LayoutPageHeader title="Trips" subtitle="Every drive you have recorded. Open one to see where you went.">
       <template #actions>
         <span v-if="total" class="text-xs font-medium px-2.5 py-1 rounded-full" style="background: var(--color-accent-soft); color: var(--color-accent)">
           {{ total }} trip{{ total === 1 ? '' : 's' }}{{ filtered ? ' found' : '' }}
@@ -88,8 +88,8 @@ function formatDuration(seconds: number | null): string {
     />
     <DataEmptyState
       v-else-if="trips.length === 0"
-      title="No trips recorded"
-      message="Trips will appear here once the device records driving data."
+      title="No trips yet"
+      message="Your drives will show up here after the device records one and sends it to the server."
     />
 
     <div

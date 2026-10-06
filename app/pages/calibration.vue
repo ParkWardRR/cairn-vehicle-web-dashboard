@@ -106,7 +106,7 @@ const chartOption = computed(() => {
 
 <template>
   <div>
-    <LayoutPageHeader title="Speedometer Calibration" subtitle="OBD vs GNSS speed agreement">
+    <LayoutPageHeader title="Speedometer check" subtitle="Does your car's speedometer agree with GPS?">
       <template #actions>
         <span v-if="points.length" class="text-xs font-medium px-2.5 py-1 rounded-full" style="background: var(--color-accent-soft); color: var(--color-accent)">
           {{ points.length }} samples
@@ -148,7 +148,7 @@ const chartOption = computed(() => {
         <template v-if="points.length > 0">
           <VChart :option="chartOption" autoresize style="height: 500px; width: 100%" />
         </template>
-        <DataEmptyState v-else title="No speed data" message="Speed agreement data will appear once trips with both OBD and GNSS readings are recorded." />
+        <DataEmptyState v-else title="No speed data yet" message="This fills in once a trip has both the car's own speed and GPS speed. are recorded." />
       </div>
 
       <!-- Explanation card -->

@@ -242,7 +242,7 @@ const loading = computed(() => trimStatus.value === 'pending' || fuelStatus.valu
 
 <template>
   <div>
-    <LayoutPageHeader title="Fuel & Tune" subtitle="Ethanol blend estimation, fuel flow, and trim health" />
+    <LayoutPageHeader title="Fuel mix" subtitle="Your ethanol blend, how much fuel the engine uses, and whether its fuel corrections look healthy" />
 
     <!-- Blend Estimator -->
     <div class="rounded-xl p-5 mb-4" :style="{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }">
@@ -322,7 +322,7 @@ const loading = computed(() => trimStatus.value === 'pending' || fuelStatus.valu
         <h2 class="text-base font-semibold">Fuel Flow vs RPM</h2>
         <span class="text-[11px]" style="color: var(--color-text-secondary)">Estimated from MAF at E{{ activeBlend }} (stoich {{ stoichForBlend(activeBlend).toFixed(1) }})</span>
       </div>
-      <DataEmptyState v-if="!flowSamples.length" title="No MAF data" message="Need MAF + lambda samples for fuel flow estimation." />
+      <DataEmptyState v-if="!flowSamples.length" title="No fuel use data yet" message="Needs a drive where the car reported airflow and the air-fuel balance." />
       <VChart v-else :option="fuelFlowChartOption" autoresize style="height: 320px; width: 100%" />
     </div>
 
@@ -333,14 +333,14 @@ const loading = computed(() => trimStatus.value === 'pending' || fuelStatus.valu
           <h2 class="text-base font-semibold">Lambda vs Load</h2>
           <span class="text-[11px]" style="color: var(--color-text-secondary)">Rich under load = safe</span>
         </div>
-        <DataEmptyState v-if="!lambdaLoad.length" title="No lambda data" message="Need lambda + load samples." />
+        <DataEmptyState v-if="!lambdaLoad.length" title="No air-fuel data yet" message="Needs a drive where the car reported the air-fuel balance and engine load." />
         <VChart v-else :option="lambdaLoadChartOption" autoresize style="height: 320px; width: 100%" />
       </div>
 
       <!-- Per-trip LTFT trend -->
       <div class="rounded-xl p-6" :style="{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }">
         <h2 class="text-base font-semibold mb-4">LTFT by Trip</h2>
-        <DataEmptyState v-if="!perTrip.length" title="No trim data" message="Need multiple trips with fuel trim data." />
+        <DataEmptyState v-if="!perTrip.length" title="Not enough drives yet" message="Needs several drives where the car reported its fuel corrections." />
         <div v-else class="space-y-2">
           <div v-for="t in perTrip" :key="t.boot_id"
             class="flex items-center justify-between py-2 px-3 rounded-lg"
@@ -363,7 +363,7 @@ const loading = computed(() => trimStatus.value === 'pending' || fuelStatus.valu
     <!-- Trim Heatmap -->
     <div class="rounded-xl p-6 mb-4" :style="{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }">
       <h2 class="text-base font-semibold mb-4">LTFT Map — RPM vs Load</h2>
-      <DataEmptyState v-if="!rows.length" title="No trim data" message="Fuel trim map data will appear once enough OBD samples are collected." />
+      <DataEmptyState v-if="!rows.length" title="No fuel correction data yet" message="Appears once enough readings have been collected from the car." />
       <VChart v-else :option="trimHeatmapOption" autoresize style="height: 400px; width: 100%" />
     </div>
 

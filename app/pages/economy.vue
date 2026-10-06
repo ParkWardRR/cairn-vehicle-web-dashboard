@@ -192,7 +192,7 @@ const loadZoneLabel: Record<string, string> = { light: '< 20%', medium: '20–50
 
 <template>
   <div>
-    <LayoutPageHeader title="Fuel Economy" subtitle="Estimated MPG, efficiency by speed and RPM, tuning context" />
+    <LayoutPageHeader title="Fuel economy" subtitle="Miles per gallon, and what changes it. These are estimates." />
 
     <!-- Stat cards -->
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-4 sticky top-0 z-10 py-3 -mt-3" style="background: var(--color-background)">
@@ -209,7 +209,7 @@ const loadZoneLabel: Record<string, string> = { light: '< 20%', medium: '20–50
         <h2 class="text-base font-semibold">MPG vs Speed</h2>
         <span class="text-[11px]" style="color: var(--color-text-secondary)">Estimated from MAF at E{{ activeBlend }}</span>
       </div>
-      <DataEmptyState v-if="!mpgData.length" title="No economy data" message="Need MAF + speed + lambda samples while driving." />
+      <DataEmptyState v-if="!mpgData.length" title="No fuel economy yet" message="Needs a drive where the car reported airflow and speed." />
       <VChart v-else :option="mpgSpeedChartOption" autoresize style="height: 340px; width: 100%" />
     </div>
 
@@ -220,14 +220,14 @@ const loadZoneLabel: Record<string, string> = { light: '< 20%', medium: '20–50
           <h2 class="text-base font-semibold">MPG vs RPM</h2>
           <span class="text-[11px]" style="color: var(--color-text-secondary)">Colored by engine load</span>
         </div>
-        <DataEmptyState v-if="!mpgData.length" title="No data" message="Need MAF + RPM samples." />
+        <DataEmptyState v-if="!mpgData.length" title="No data" message="Needs a drive where the car reported airflow and engine speed." />
         <VChart v-else :option="mpgRpmChartOption" autoresize style="height: 280px; width: 100%" />
       </div>
 
       <!-- Tuning efficiency by load zone -->
       <div class="rounded-xl p-6" :style="{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }">
         <h2 class="text-base font-semibold mb-4">Tuning Efficiency by Load</h2>
-        <DataEmptyState v-if="!timingByLoad.length" title="No data" message="Need timing + load data." />
+        <DataEmptyState v-if="!timingByLoad.length" title="No data" message="Needs a drive where the car reported ignition timing and engine load." />
         <div v-else class="space-y-3">
           <div v-for="zone in loadZoneOrder" :key="zone">
             <template v-for="z in timingByLoad.filter(t => t.load_zone === zone)" :key="z.load_zone">
@@ -268,7 +268,7 @@ const loadZoneLabel: Record<string, string> = { light: '< 20%', medium: '20–50
     <!-- Per-trip comparison -->
     <div class="rounded-xl p-6 mb-4" :style="{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }">
       <h2 class="text-base font-semibold mb-4">Economy by Trip</h2>
-      <DataEmptyState v-if="!perTripMpg.length" title="No trips" message="Need multiple trips with MAF data." />
+      <DataEmptyState v-if="!perTripMpg.length" title="Not enough drives yet" message="Needs several drives where the car reported airflow." />
       <div v-else class="space-y-2">
         <div v-for="t in perTripMpg" :key="t.boot_id"
           class="flex items-center justify-between py-3 px-4 rounded-lg"

@@ -177,7 +177,7 @@ const temperaturesOptions = computed(() => ({
 
 <template>
   <div>
-    <LayoutPageHeader title="Engine Analytics" subtitle="Deep-dive telemetry viewer" />
+    <LayoutPageHeader title="Engine details" subtitle="Look inside one drive: speed, revs, temperatures and more" />
 
     <div class="mb-6">
       <select
@@ -194,7 +194,7 @@ const temperaturesOptions = computed(() => ({
       <div v-if="drivesStatus === 'pending'" class="skeleton h-12" />
     </div>
 
-    <DataEmptyState v-if="!selectedBootId" title="No trip selected" message="Select a trip to view telemetry" />
+    <DataEmptyState v-if="!selectedBootId" title="Pick a drive" message="Choose a trip above to see what the engine was doing." />
 
     <div v-else-if="telemetryStatus === 'pending'" class="flex items-center justify-center py-16">
       <div class="spinner" />

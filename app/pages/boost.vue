@@ -203,7 +203,7 @@ const iatBoostChartOption = computed(() => {
 
 <template>
   <div>
-    <LayoutPageHeader title="Boost & Power" subtitle="Turbo performance and intake temperature analysis" />
+    <LayoutPageHeader title="Turbo" subtitle="How hard the turbo works, and how hot the air going into the engine gets" />
 
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-8 sticky top-0 z-10 py-3 -mt-3" style="background: var(--color-background)">
       <DataStatCard label="Peak Boost" :value="peakBoost != null && peakBoost > -Infinity ? `${peakBoost.toFixed(1)}` : '--'" subtitle="psi all time"
@@ -220,7 +220,7 @@ const iatBoostChartOption = computed(() => {
         <h2 class="text-base font-semibold">Boost Curve</h2>
         <span class="text-[11px]" style="color: var(--color-text-secondary)">Colored by intake air temp</span>
       </div>
-      <DataEmptyState v-if="!curve.length" title="No boost data" message="Boost data will appear once WOT events are recorded." />
+      <DataEmptyState v-if="!curve.length" title="No turbo data yet" message="This fills in after a drive with some full-throttle acceleration." />
       <VChart v-else :option="boostChartOption" autoresize style="height: 380px; width: 100%" />
     </div>
 
@@ -231,7 +231,7 @@ const iatBoostChartOption = computed(() => {
           <h2 class="text-base font-semibold">IAT vs Boost</h2>
           <span class="text-[11px]" style="color: var(--color-text-secondary)">Higher boost → hotter intake</span>
         </div>
-        <DataEmptyState v-if="!iatBoost.length" title="No data" message="Need boost + IAT samples." />
+        <DataEmptyState v-if="!iatBoost.length" title="No data" message="Needs a drive with turbo pressure and intake temperature readings." />
         <VChart v-else :option="iatBoostChartOption" autoresize style="height: 280px; width: 100%" />
       </div>
 
@@ -240,7 +240,7 @@ const iatBoostChartOption = computed(() => {
           <h2 class="text-base font-semibold">Timing Under Boost</h2>
           <span class="text-[11px]" style="color: var(--color-text-secondary)">Colored by boost pressure</span>
         </div>
-        <DataEmptyState v-if="!timing.length" title="No data" message="Need timing + boost samples." />
+        <DataEmptyState v-if="!timing.length" title="No data" message="Needs a drive with ignition timing and turbo pressure readings." />
         <VChart v-else :option="timingChartOption" autoresize style="height: 280px; width: 100%" />
       </div>
     </div>
@@ -248,7 +248,7 @@ const iatBoostChartOption = computed(() => {
     <!-- WOT Pulls -->
     <div class="rounded-xl p-6" :style="{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }">
       <h2 class="text-base font-semibold mb-4">WOT Pulls</h2>
-      <DataEmptyState v-if="!pulls.length" title="No pulls recorded" message="WOT pulls will appear once full-throttle events are detected." />
+      <DataEmptyState v-if="!pulls.length" title="No full-throttle runs yet" message="Each hard acceleration you make will be listed here." />
       <div v-else class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead>

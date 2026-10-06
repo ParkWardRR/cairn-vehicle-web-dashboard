@@ -2,6 +2,8 @@ export const useUiStore = defineStore('ui', () => {
   const theme = ref<'dark' | 'light' | 'auto'>('auto')
   const sidebarCollapsed = ref(false)
   const mapProvider = ref<'apple' | 'local'>('apple')
+  // Simple by default: the everyday pages. Detailed adds the engine, turbo, fuel and driving-style views.
+  const detailed = ref(false)
 
   const resolvedTheme = computed(() => {
     if (theme.value !== 'auto') return theme.value
@@ -21,9 +23,13 @@ export const useUiStore = defineStore('ui', () => {
     sidebarCollapsed.value = !sidebarCollapsed.value
   }
 
+  function toggleDetailed() {
+    detailed.value = !detailed.value
+  }
+
   function setMapProvider(provider: 'apple' | 'local') {
     mapProvider.value = provider
   }
 
-  return { theme, resolvedTheme, sidebarCollapsed, mapProvider, toggleTheme, toggleSidebar, setMapProvider }
+  return { theme, resolvedTheme, sidebarCollapsed, mapProvider, detailed, toggleTheme, toggleSidebar, toggleDetailed, setMapProvider }
 }, { persist: import.meta.client })

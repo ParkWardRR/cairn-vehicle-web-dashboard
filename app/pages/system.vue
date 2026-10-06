@@ -115,7 +115,7 @@ const tsdbPairs = computed(() => {
 
 <template>
   <div>
-    <LayoutPageHeader title="Device & System" subtitle="Hardware health and data pipeline" />
+    <LayoutPageHeader title="Your device" subtitle="Is the device healthy, and has your data arrived?" />
 
     <!-- Health charts -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
@@ -129,14 +129,14 @@ const tsdbPairs = computed(() => {
           <v-chart :option="tempChart" style="height: 200px; width: 100%" autoresize />
         </div>
         <div class="rounded-xl p-4" :style="{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }">
-          <h3 class="text-[13px] font-semibold mb-3">SD Free</h3>
+          <h3 class="text-[13px] font-semibold mb-3">Storage free</h3>
           <v-chart :option="sdChart" style="height: 200px; width: 100%" autoresize />
         </div>
       </template>
       <template v-else>
         <div class="lg:col-span-2 rounded-xl p-6"
           :style="{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }">
-          <DataEmptyState title="No health data" message="Device health metrics will appear once the dongle reports in." />
+          <DataEmptyState title="No device news yet" message="You will see battery, signal and temperature here once the device has connected." />
         </div>
       </template>
     </div>
@@ -186,7 +186,7 @@ const tsdbPairs = computed(() => {
         </div>
       </template>
 
-      <DataEmptyState v-else title="No bundles" message="Data bundles will appear here as the device uploads telemetry." />
+      <DataEmptyState v-else title="Nothing uploaded yet" message="Each upload from the device is listed here." />
     </div>
 
     <!-- TSDB Status -->
@@ -209,7 +209,7 @@ const tsdbPairs = computed(() => {
         </div>
       </template>
 
-      <DataEmptyState v-else title="TSDB unavailable" message="Time-series database status will appear once the service is reachable." />
+      <DataEmptyState v-else title="Server storage not reachable" message="Storage details appear once the server's data store is running." />
     </div>
   </div>
 </template>

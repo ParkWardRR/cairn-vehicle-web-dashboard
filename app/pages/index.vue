@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const ui = useUiStore()
 function formatDuration(seconds: number | null | undefined): string {
   if (!seconds || seconds <= 0) return '--'
   const h = Math.floor(seconds / 3600)
@@ -95,7 +96,7 @@ const recentTrips = computed(() => recent.value?.trips?.slice(0, 5) ?? [])
 
 <template>
   <div>
-    <LayoutPageHeader title="Dashboard" subtitle="Vehicle telemetry overview" />
+    <LayoutPageHeader title="Home" subtitle="Your recent drives and how your car and device are doing" />
 
     <!-- Stat cards -->
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-8">
@@ -186,7 +187,7 @@ const recentTrips = computed(() => recent.value?.trips?.slice(0, 5) ?? [])
           </NuxtLink>
         </template>
 
-        <DataEmptyState v-else title="No trips yet" message="Trip data will appear here once your first drive is recorded." />
+        <DataEmptyState v-else title="No drives yet" message="Your drives will show up here after the device records your first one and sends it to the server." />
       </div>
 
       <!-- Device Health -->
@@ -215,8 +216,8 @@ const recentTrips = computed(() => recent.value?.trips?.slice(0, 5) ?? [])
               v-for="(item, idx) in [
                 { label: 'Battery', value: device.battery_mv != null ? `${(device.battery_mv / 1000).toFixed(2)} V` : '--', statusFn: () => batteryStatus(device.battery_mv) },
                 { label: 'Temperature', value: device.device_temp_c != null ? `${device.device_temp_c} °C` : '--', statusFn: () => tempStatus(device.device_temp_c) },
-                { label: 'SD Free', value: device.sd_free_mib != null ? `${device.sd_free_mib} MiB` : '--', statusFn: () => ({ label: (device.sd_free_mib ?? 0) > 100 ? 'OK' : (device.sd_free_mib ?? 0) > 20 ? 'Low' : 'Full', status: (device.sd_free_mib ?? 0) > 100 ? 'success' : (device.sd_free_mib ?? 0) > 20 ? 'warning' : 'danger' }) },
-                { label: 'RSSI', value: device.rssi_dbm != null ? `${device.rssi_dbm} dBm` : '--', statusFn: () => rssiStatus(device.rssi_dbm) },
+                { label: 'Storage free', value: device.sd_free_mib != null ? `${device.sd_free_mib} MiB` : '--', statusFn: () => ({ label: (device.sd_free_mib ?? 0) > 100 ? 'OK' : (device.sd_free_mib ?? 0) > 20 ? 'Low' : 'Full', status: (device.sd_free_mib ?? 0) > 100 ? 'success' : (device.sd_free_mib ?? 0) > 20 ? 'warning' : 'danger' }) },
+                { label: 'Signal', value: device.rssi_dbm != null ? `${device.rssi_dbm} dBm` : '--', statusFn: () => rssiStatus(device.rssi_dbm) },
               ]"
               :key="item.label"
               class="flex items-center justify-between py-1.5 pb-3.5"
@@ -235,40 +236,40 @@ const recentTrips = computed(() => recent.value?.trips?.slice(0, 5) ?? [])
           </p>
         </template>
 
-        <DataEmptyState v-else title="No device data" message="Device health information will appear once the dongle connects." />
+        <DataEmptyState v-else title="No device news yet" message="You will see the device's battery, signal and last contact here once it has connected." />
       </div>
     </div>
 
-    <!-- Engine & Tune Highlights -->
-    <div v-if="highlights" class="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mt-6">
+    <!-- Engine highlights: part of the detailed view -->
+    <div v-if="highlights && ui.detailed" class="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mt-6">
       <DataStatCard
-        label="Peak Boost"
+        label="Highest turbo pressure"
         :value="highlights.engine.peak_boost_psi != null ? `${highlights.engine.peak_boost_psi}` : '--'"
-        subtitle="psi all time"
+        subtitle="psi, ever"
         :color="(highlights.engine.peak_boost_psi ?? 0) > 20 ? 'warning' : undefined"
       />
       <DataStatCard
-        label="Peak RPM"
+        label="Highest engine speed"
         :value="highlights.engine.peak_rpm != null ? highlights.engine.peak_rpm.toLocaleString() : '--'"
-        subtitle="all time"
+        subtitle="rpm, ever"
         :color="(highlights.engine.peak_rpm ?? 0) >= 6000 ? 'warning' : undefined"
       />
       <DataStatCard
-        label="Avg Lambda"
+        label="Air-fuel balance"
         :value="highlights.engine.avg_lambda != null ? String(highlights.engine.avg_lambda) : '--'"
-        :subtitle="(highlights.engine.avg_lambda ?? 1) > 1.1 ? 'running lean (E41 expected)' : 'stoichiometric'"
+        :subtitle="(highlights.engine.avg_lambda ?? 1) > 1.1 ? 'more air than fuel' : 'balanced'"
       />
       <DataStatCard
-        label="LTFT"
+        label="Fuel correction"
         :value="highlights.engine.avg_ltft != null ? `${highlights.engine.avg_ltft > 0 ? '+' : ''}${highlights.engine.avg_ltft}%` : '--'"
-        :subtitle="(highlights.engine.avg_ltft ?? 0) > 10 ? 'high — ethanol blend' : 'fuel trim'"
+        :subtitle="(highlights.engine.avg_ltft ?? 0) > 10 ? 'the engine is adding fuel' : 'long-term average'"
         :color="Math.abs(highlights.engine.avg_ltft ?? 0) > 20 ? 'warning' : undefined"
       />
     </div>
 
     <!-- Recent Trips -->
     <div class="mt-6">
-      <h2 class="text-[11px] font-bold uppercase tracking-wider mb-3" style="color: var(--color-text-secondary)">Recent Trips</h2>
+      <h2 class="text-[11px] font-bold uppercase tracking-wider mb-3" style="color: var(--color-text-secondary)">Recent trips</h2>
 
       <template v-if="recentPending">
         <div class="space-y-2">

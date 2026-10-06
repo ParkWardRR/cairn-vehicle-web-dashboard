@@ -292,7 +292,7 @@ function insightIcon(icon: string | undefined): string {
 <template>
   <div>
     <!-- Header -->
-    <LayoutPageHeader title="Trip Detail" :subtitle="trip ? formatDate(trip.start?.observed_at) : `Boot: ${bootId.slice(0, 12)}…`">
+    <LayoutPageHeader title="Trip" :subtitle="trip ? formatDate(trip.start?.observed_at) : 'Loading this drive…'">
       <template #actions>
         <TripsTripImageButton :boot-id="bootId" />
         <NuxtLink

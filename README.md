@@ -1,12 +1,23 @@
 # Cairn vehicle web dashboard
 
-The browser dashboard of the [Cairn driving log](https://github.com/ParkWardRR/cairn-driving-log-selfhosted): trips, routes,
-places, boost and fuel-trim analysis, device health. A Nuxt app with a small server layer in front of
-the vehicle server's time-series store; nothing is sent anywhere except the map tiles and, if you turn
-it on, place-name lookups.
+**See your drives.** This is the website for the [Cairn driving log](https://github.com/ParkWardRR/cairn-driving-log-selfhosted):
+a small device in your car records each drive, and this site shows them to you: where you went, how far and how
+long, how the car is doing, and what you want to remember about each trip. It runs on your own computer or home
+server. Nothing is sent to anyone except map tiles and, if you turn it on, place-name lookups.
 
-It needs the [vehicle server](https://github.com/ParkWardRR/cairn-vehicle-server) (its `cairn-tsdb`) to
-show real data. It reads the store over HTTP and never writes to it.
+**Who it is for:** the person who drives the car first, then other enthusiasts. The everyday pages (Home, Trips,
+Statistics, Places, Your device) are written in plain words; the engine, turbo and fuel pages are one click away
+under **Show detailed views**.
+
+**Where to start**
+
+- *Just look around:* run the demo below. It uses invented drives, so you need no car and no device.
+- *Use it with your car:* you also need the [vehicle server](https://github.com/ParkWardRR/cairn-vehicle-server)
+  (its `cairn-tsdb` store). This site reads that store and never writes to it. The front-door repository explains the
+  whole setup, including the device.
+- *Put it on a server you already have:* see [Deploy](#deploy), and [docs/auth.md](docs/auth.md) for how sign-in works.
+
+This is a Nuxt app with a small server layer in front of the store.
 
 ## Run it
 

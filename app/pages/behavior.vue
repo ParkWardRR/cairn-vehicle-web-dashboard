@@ -179,7 +179,7 @@ function formatDate(iso: string | null | undefined): string {
 
 <template>
   <div>
-    <LayoutPageHeader title="Drive Behavior" subtitle="Driving style and motion analysis">
+    <LayoutPageHeader title="Driving style" subtitle="How smoothly you accelerate, brake and corner">
       <template #actions>
         <span v-if="latestBootId" class="text-xs font-medium px-2.5 py-1 rounded-full" style="background: var(--color-accent-soft); color: var(--color-accent)">
           {{ stats.total.toLocaleString() }} IMU samples
@@ -237,7 +237,7 @@ function formatDate(iso: string | null | undefined): string {
         <VChart :option="gForceChartOption" style="height: 400px; width: 100%" autoresize />
       </template>
 
-      <DataEmptyState v-else title="No IMU data" message="G-force data will appear once accelerometer telemetry is available." />
+      <DataEmptyState v-else title="No motion data yet" message="Cornering and braking forces appear once the device has recorded movement." />
     </div>
 
     <!-- Vibration histogram -->
@@ -254,7 +254,7 @@ function formatDate(iso: string | null | undefined): string {
         <VChart :option="rmsHistogramOption" style="height: 240px; width: 100%" autoresize />
       </template>
 
-      <DataEmptyState v-else title="No vibration data" message="Vibration histogram will appear once IMU data is available." />
+      <DataEmptyState v-else title="No vibration data yet" message="Shown once the device has recorded movement." />
     </div>
 
     <!-- Trip-level summary -->
@@ -283,7 +283,7 @@ function formatDate(iso: string | null | undefined): string {
           </div>
         </div>
       </template>
-      <DataEmptyState v-else title="No trips recorded" message="Trips will appear here once driving data is logged." />
+      <DataEmptyState v-else title="No trips yet" message="Your drives will show up here after the device records one." />
     </div>
   </div>
 </template>
