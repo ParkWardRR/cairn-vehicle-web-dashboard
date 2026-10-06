@@ -50,6 +50,12 @@ while read -r method path; do
   code="$(c -sS -o "$out" -w '%{http_code}' --max-time 60 "$BASE$path?boot_id=$boot" || echo 000)"
   noroute=0; grep -q 'Page not found: ' "$out" 2>/dev/null && noroute=1
   rm -f "$out"
+  case "$path" in
+    # for people only: the read-only service token must be refused, and a 2xx here would be the failure
+    /api/auth/passkeys|/api/auth/audit)
+      if [ "$code" = 403 ]; then ok=$((ok+1)); else bad=$((bad+1)); echo "FAIL $code $path (expected 403 for the service token)"; fi
+      continue ;;
+  esac
   case "$code" in
     2??) ok=$((ok+1)) ;;
     400|404|503) if [ "$EMPTY" = 1 ] && [ "$noroute" = 0 ]; then ok=$((ok+1)); else bad=$((bad+1)); echo "FAIL $code $path"; fi ;;
