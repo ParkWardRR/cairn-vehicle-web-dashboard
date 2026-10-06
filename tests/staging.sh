@@ -128,8 +128,10 @@ if [ "$rc" -eq 0 ] && [ "$CAPTURE" = 1 ]; then
     const lines = require("fs").readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean)
     // The demo store mints some ids at build time, and EXPLAIN binds a statement without caring
     // which id it names, so ids are normalised: the file then does not depend on the run.
+    // Dates move with the clock (the demo store dates its trips from now), so they are normalised too.
     const zeros = "\x27" + "0".repeat(32) + "\x27"
-    const sql = [...new Set(lines.map(l => JSON.parse(l).replace(/\x27[0-9a-f]{32}\x27/g, zeros)))].sort()
+    const norm = (q) => q.replace(/\x27[0-9a-f]{32}\x27/g, zeros).replace(/\x27\d{4}-\d{2}-\d{2}[^\x27]*\x27/g, "\x272000-01-01\x27")
+    const sql = [...new Set(lines.map(l => norm(JSON.parse(l))))].sort()
     require("fs").writeFileSync(process.argv[2], JSON.stringify(sql, null, 1) + "\n")
     console.log("==> captured " + sql.length + " distinct statements into deploy/required-queries.json")
   ' "$SQL_LOG" deploy/required-queries.json
