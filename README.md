@@ -44,6 +44,10 @@ Before uploading anything, `deploy-ui.sh` has the live store plan (`EXPLAIN`, no
 is the SQL the web layer sent the demo store during staging; regenerate it with `tests/staging.sh --capture`
 (CI fails if it is stale).
 
+`deploy-ui.sh --snapshot` first takes a snapshot of the web layer's stores (`/var/lib/cairn-ui`, consistent
+SQLite copies) and the deployed build into `/var/backups/cairn-ui/<time>/` (root-only, with a manifest), restores it
+into a scratch directory and checks integrity, row counts and hashes; the deploy stops if that fails.
+
 `deploy/install-fsq.sh` (or `deploy/deploy-ui.sh --with-fsq`) builds the `cairn-fsq` place-extract tool on the host
 (DuckDB links through cgo, so the host needs go and gcc) and installs it as `/usr/local/bin/cairn-fsq`, keeping
 the previous binary as `.prev`.

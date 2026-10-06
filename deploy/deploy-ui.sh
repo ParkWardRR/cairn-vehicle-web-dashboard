@@ -3,6 +3,8 @@
 #
 #   deploy/deploy-ui.sh            build the committed code (HEAD) and deploy it
 #   deploy/deploy-ui.sh --dirty    build the working tree, uncommitted changes and all
+#   deploy/deploy-ui.sh --snapshot snapshot the web layer's stores and build on the host, and
+#                                  restore-test the snapshot, before changing anything
 #   deploy/deploy-ui.sh --with-fsq also build and install tools/cairn-fsq on the host
 #                                  (deploy/install-fsq.sh does only that)
 #
@@ -19,11 +21,12 @@ ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 [ -f "$ROOT/deploy.env" ] && . "$ROOT/deploy.env"
 HOST="${CAIRN_DEPLOY_HOST:?set CAIRN_DEPLOY_HOST (user@host), or put it in deploy.env}"
 
-DIRTY=0; WITH_FSQ=0
+DIRTY=0; WITH_FSQ=0; SNAPSHOT=0
 for a in "$@"; do
   case "$a" in
     --dirty) DIRTY=1 ;;
     --with-fsq) WITH_FSQ=1 ;;
+    --snapshot) SNAPSHOT=1 ;;
     *) echo "unknown option: $a" >&2; exit 2 ;;
   esac
 done
@@ -60,6 +63,20 @@ if ! ssh "$HOST" "node $CAP_DIR/check-capabilities.mjs $CAP_DIR/required-queries
   exit 1
 fi
 ssh "$HOST" "rm -rf $CAP_DIR" || true
+
+if [ "$SNAPSHOT" = 1 ]; then
+  echo "==> Snapshotting the web layer's stores and build on the host..."
+  SNAP_TOOL="$(ssh "$HOST" 'mktemp -d')"
+  scp -q "$BUILD_DIR/deploy/web-snapshot.mjs" "$HOST:$SNAP_TOOL/"
+  SNAP="$(ssh "$HOST" "sudo node $SNAP_TOOL/web-snapshot.mjs snapshot /var/lib/cairn-ui $UI_DIR/.output /var/backups/cairn-ui" | tail -1)"
+  echo "    snapshot: $SNAP"
+  if ! ssh "$HOST" "sudo node $SNAP_TOOL/web-snapshot.mjs verify $SNAP /var/lib/cairn-ui"; then
+    ssh "$HOST" "rm -rf $SNAP_TOOL" || true
+    echo "==> Refusing to deploy: the snapshot did not restore cleanly. Nothing was changed." >&2
+    exit 1
+  fi
+  ssh "$HOST" "rm -rf $SNAP_TOOL" || true
+fi
 
 echo "==> Uploading build to $HOST:$UI_DIR..."
 ssh "$HOST" "sudo mkdir -p $UI_DIR && sudo chown cairn:cairn $UI_DIR"
