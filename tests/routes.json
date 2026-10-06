@@ -6,7 +6,6 @@
   {"method": "GET", "path": "/api/analytics/fuel-health"},
   {"method": "GET", "path": "/api/analytics/imu"},
   {"method": "GET", "path": "/api/analytics/pulls"},
-  {"method": "POST", "path": "/api/analytics/query"},
   {"method": "GET", "path": "/api/analytics/speed-agreement"},
   {"method": "GET", "path": "/api/analytics/telemetry"},
   {"method": "GET", "path": "/api/analytics/trim-map"},

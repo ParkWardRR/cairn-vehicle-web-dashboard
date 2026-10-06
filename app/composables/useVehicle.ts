@@ -37,17 +37,27 @@ export function vehicleScopeForPath(path: string): VehiclePageScope {
 
 const VEHICLE_ID_RE = /^[0-9a-f]{32}$/
 const LIST_KEY = 'cairn-vehicles'
+const STORE_DOWN_KEY = 'cairn-store-down'
+
+// True while the server reports its store unreachable (502 "store unreachable"),
+// so the shell can say so once instead of every page showing its own empty state.
+export function useStoreDown() {
+  return useState<boolean>(STORE_DOWN_KEY, () => false)
+}
 
 // Loaded once, before any page runs, by plugins/vehicles.ts: a single-vehicle
 // page has to know which car it shows before it fires its first fetch.
 export async function loadVehicles(): Promise<void> {
   const list = useState<VehicleOption[] | null>(LIST_KEY, () => null)
+  const storeDown = useStoreDown()
   if (list.value !== null) return
   try {
     const res = await $fetch<{ vehicles: VehicleOption[] }>('/api/vehicles')
     list.value = res.vehicles ?? []
-  } catch {
+    storeDown.value = false
+  } catch (e: any) {
     // Left null so the client tries again; until then nothing is filtered by id.
+    storeDown.value = (e?.statusCode ?? e?.response?.status) === 502
   }
 }
 

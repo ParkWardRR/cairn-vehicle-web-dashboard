@@ -1,6 +1,18 @@
 <script setup lang="ts">
 const ui = useUiStore()
 const route = useRoute()
+const storeDown = useStoreDown()
+const retrying = ref(false)
+
+async function retryStore() {
+  retrying.value = true
+  try {
+    await loadVehicles()
+    if (!storeDown.value) await refreshNuxtData()
+  } finally {
+    retrying.value = false
+  }
+}
 
 useHead({
   htmlAttrs: { class: () => ui.resolvedTheme === 'light' ? 'light' : '' },
@@ -31,6 +43,22 @@ function isActive(path: string) {
       :class="ui.sidebarCollapsed ? 'md:ml-16' : 'md:ml-56'"
     >
       <div class="p-4 md:p-6 lg:p-8 max-w-[1400px]">
+        <div
+          v-if="storeDown"
+          role="alert"
+          class="mb-4 flex items-center justify-between gap-3 rounded-lg px-4 py-3 text-sm"
+          :style="{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }"
+        >
+          <span>The server's store is not reachable, so there is no data to show right now. Your saved places are unaffected.</span>
+          <button
+            type="button"
+            class="shrink-0 font-medium text-[var(--color-accent)] disabled:opacity-50"
+            :disabled="retrying"
+            @click="retryStore"
+          >
+            {{ retrying ? 'Retrying…' : 'Retry' }}
+          </button>
+        </div>
         <NuxtPage />
       </div>
     </main>

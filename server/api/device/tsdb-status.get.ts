@@ -2,7 +2,7 @@ export default defineEventHandler(async (event) => {
   const v = await vehicleScope(event)
   const health = await tsdbHealth()
   if (!health.ok) {
-    throw createError({ statusCode: 502, statusMessage: 'TSDB unreachable' })
+    throw storeUnreachable()
   }
 
   const tables = await queryTsdbObjects(`

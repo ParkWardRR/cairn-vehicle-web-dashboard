@@ -425,14 +425,15 @@ describe('bad input', () => {
 describe('missing capability: the store is not there', () => {
   const fakeBoot = { bootId: UNKNOWN_BOOT }
 
-  it('every store-backed route fails cleanly: a JSON error, an error status, quickly', async () => {
+  it('every store-backed route answers 502 "store unreachable": a JSON error, quickly', async () => {
     const routes = inventory.filter(r => r.method === 'GET' && !r.path.startsWith('/api/places/saved'))
     for (const r of routes) {
       const started = Date.now()
       const res = await GET(DOWN, r.path, { params: fakeBoot, query: { boot_id: UNKNOWN_BOOT } })
       expect(Date.now() - started, r.path).toBeLessThan(10_000)
-      expect(res.status, r.path).toBeGreaterThanOrEqual(400)
+      expect(res.status, r.path).toBe(502)
       expect(res.body?.error, r.path).toBe(true)
+      expect(res.body?.statusMessage, r.path).toBe('store unreachable')
       // no internals in the body: no stack, no connection details, no file paths
       expect(res.text, r.path).not.toMatch(/ECONNREFUSED|\bat .*\(.*:\d+:\d+\)|node_modules|\/Users\/|\/home\//)
     }

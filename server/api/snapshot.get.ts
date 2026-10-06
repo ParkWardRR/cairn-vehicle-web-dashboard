@@ -13,7 +13,9 @@ export default defineEventHandler(async (event) => {
   if (vehicle) params.set('vehicle', vehicle)
   const qs = params.toString()
 
-  const res = await fetch(`${config.tsdbUrl}/snapshot${qs ? '?' + qs : ''}`, { headers })
+  const res = await fetch(`${config.tsdbUrl}/snapshot${qs ? '?' + qs : ''}`, { headers }).catch(() => {
+    throw storeUnreachable()
+  })
 
   setResponseStatus(event, res.status)
   for (const key of ['content-type', 'content-length', 'etag', 'last-modified', 'cache-control']) {
