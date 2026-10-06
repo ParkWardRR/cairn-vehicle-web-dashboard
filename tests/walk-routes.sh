@@ -18,7 +18,7 @@ BASE="${1:?usage: walk-routes.sh [--empty] <base-url>}"
 BASE="${BASE%/}"
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
-boot="$(curl -fsS "$BASE/api/trips" | sed -n 's/.*"boot_id":"\([0-9a-f]*\)".*/\1/p' | head -1)"
+boot="$(curl -fsS "$BASE/api/trips" | sed -n 's/.*"boot_id": *"\([0-9a-f]*\)".*/\1/p' | head -1)"
 [ -n "$boot" ] || echo "note: /api/trips lists no trip, so the :bootId routes are skipped" >&2
 
 ok=0; bad=0; skipped=0

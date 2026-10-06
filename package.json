@@ -7,6 +7,8 @@
     "dev": "nuxt dev",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
+    "test": "vitest run",
+    "test:acceptance": "vitest run --config vitest.acceptance.config.ts",
     "postinstall": "nuxt prepare"
   },
   "dependencies": {

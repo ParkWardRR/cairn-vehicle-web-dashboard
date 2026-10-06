@@ -25,6 +25,7 @@ to keep every coordinate local.
 
 ```sh
 npx vitest run                       # unit tests, including the route inventory check
+tests/staging.sh                     # staged acceptance: every route, five scenarios, over the demo store
 tests/walk-routes.sh http://localhost:3000   # every GET route against a running instance
 (cd tools/cairn-fsq && go test ./...)        # the command-line snapshot query tool
 ```

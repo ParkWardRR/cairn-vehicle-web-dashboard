@@ -33,3 +33,6 @@ logs
 # Agent scratch
 .claude/
 .nimbalyst/
+
+# Staged acceptance: the pinned server checkout and the demo store binary
+/.staging/
