@@ -5,6 +5,6 @@ export default defineVitestConfig({
   test: {
     environment: 'happy-dom',
     // needs staged instances: `npm run test:acceptance` (tests/staging.sh)
-    exclude: [...configDefaults.exclude, 'tests/acceptance/**'],
+    exclude: [...configDefaults.exclude, 'tests/acceptance/**', '.contracts/**', '.staging/**'],
   },
 })

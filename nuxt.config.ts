@@ -49,6 +49,22 @@ export default defineNuxtConfig({
     placesDataDir: '.data/places',
     overpassUrl: 'https://overpass-api.de/api/interpreter,https://overpass.private.coffee/api/interpreter',
     geoapifyKey: '',
+    // Authentication. Every route and page needs an identity; NUXT_AUTH_MODE=off is for local
+    // development only. An identity is a passkey session, an allowlisted Tailnet device, or the
+    // read-only service token. Real values (logins, origins) live in /etc/cairn/ui.env.
+    authMode: 'required',
+    // Comma-separated Tailnet logins allowed in by their device's address (tailscaled whois).
+    authTailnetUsers: '',
+    authTailscaleSocket: '/var/run/tailscale/tailscaled.sock',
+    // Where passkeys may be used: the public origin(s) the browser sees, e.g. https://cairn.example.lan
+    authOrigins: '',
+    authRpId: '',
+    authSessionDays: '30',
+    // State directory for auth.sqlite, the service token and the one-time enrolment code.
+    // Empty = the places data directory.
+    authDataDir: '',
+    authServiceToken: '',
+    authBootstrapCode: '',
     public: {
       cartoKey: '',
     },

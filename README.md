@@ -21,6 +21,11 @@ point `NUXT_TSDB_URL` at it.
 Place naming sends coordinates to Overpass (and Geoapify, if a key is set). Set `NUXT_PLACES_EXTERNAL=false`
 to keep every coordinate local.
 
+## Access
+
+Every route and page needs an identity: a passkey session, an allowlisted Tailnet device, or the read-only service
+token. See [docs/auth.md](docs/auth.md). `npm run dev` needs `NUXT_AUTH_MODE=off` (local development only).
+
 ## Test
 
 ```sh

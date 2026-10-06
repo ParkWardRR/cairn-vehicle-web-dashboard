@@ -13,14 +13,23 @@
 //   CAIRN_WEB_PLACES  the data instance's places directory, to prove no route leaks it
 //
 // Run with `npm run test:acceptance`; it is not part of `npx vitest run`.
-import { readFileSync } from 'node:fs'
+import { readFileSync, rmSync } from 'node:fs'
+import { createServer, type Server } from 'node:http'
 import { join } from 'node:path'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { VirtualAuthenticator } from './virtualAuthenticator'
 
 const DATA = process.env.CAIRN_WEB_DATA ?? ''
 const EMPTY = process.env.CAIRN_WEB_EMPTY ?? ''
 const DOWN = process.env.CAIRN_WEB_DOWN ?? ''
 const PLACES_DIR = process.env.CAIRN_WEB_PLACES ?? ''
+// Every instance requires authentication. The read-only service token and the one-time
+// enrolment code are given to the suite by tests/staging.sh; CAIRN_FAKE_TAILSCALE is the unix
+// socket the suite serves a fake tailscaled LocalAPI on (the instances were told to use it).
+const SERVICE_TOKEN = process.env.CAIRN_SERVICE_TOKEN ?? ''
+const BOOTSTRAP_CODE = process.env.CAIRN_BOOTSTRAP_CODE ?? ''
+const FAKE_TAILSCALE = process.env.CAIRN_FAKE_TAILSCALE ?? ''
+const OWNER_LOGIN = 'owner@example.test'
 
 const inventory = JSON.parse(readFileSync(join(__dirname, '..', 'routes.json'), 'utf8')) as { method: string; path: string }[]
 const key = (m: string, p: string) => `${m} ${p}`
@@ -30,13 +39,16 @@ const exercised = new Set<string>()
 
 type Res = { status: number; body: any; text: string; headers: Headers }
 
-async function call(base: string, method: string, route: string, opts: { params?: Record<string, string>; query?: Record<string, string>; json?: unknown; raw?: string; type?: string } = {}): Promise<Res> {
+type CallOpts = { params?: Record<string, string>; query?: Record<string, string>; json?: unknown; raw?: string; type?: string; headers?: Record<string, string>; auth?: 'none' | 'service' | 'session' }
+
+// One HTTP call, exactly as given: no credentials are added.
+async function send(base: string, method: string, route: string, opts: CallOpts = {}): Promise<Res> {
   exercised.add(key(method, route))
   let path = route
   for (const [k, v] of Object.entries(opts.params ?? {})) path = path.replace(`:${k}`, v)
   const url = new URL(base + path)
   for (const [k, v] of Object.entries(opts.query ?? {})) url.searchParams.set(k, v)
-  const headers: Record<string, string> = {}
+  const headers: Record<string, string> = { ...(opts.headers ?? {}) }
   let body: string | undefined
   if (opts.json !== undefined) {
     headers['content-type'] = 'application/json'
@@ -45,26 +57,327 @@ async function call(base: string, method: string, route: string, opts: { params?
     headers['content-type'] = opts.type ?? 'text/plain'
     body = opts.raw
   }
-  const res = await fetch(url, { method, headers, body, signal: AbortSignal.timeout(30_000) })
+  const res = await fetch(url, { method, headers, body, redirect: 'manual', signal: AbortSignal.timeout(30_000) })
   const text = await res.text()
   let parsed: any = null
   try { parsed = JSON.parse(text) } catch { /* not JSON */ }
   return { status: res.status, body: parsed, text, headers: res.headers }
 }
 
+// Reads carry the read-only service token; anything that changes state carries a passkey
+// session, enrolled and signed in through the real endpoints the first time it is needed.
+async function call(base: string, method: string, route: string, opts: CallOpts = {}): Promise<Res> {
+  const headers = { ...(opts.headers ?? {}) }
+  const mode = opts.auth ?? (['GET', 'HEAD'].includes(method) ? 'service' : 'session')
+  if (mode === 'service') headers.authorization = `Bearer ${SERVICE_TOKEN}`
+  if (mode === 'session') headers.cookie = await sessionFor(base)
+  return send(base, method, route, { ...opts, headers })
+}
+
+const authenticators = new Map<string, VirtualAuthenticator>()
+const sessions = new Map<string, string>()
+const cookieOf = (r: Res) => (r.headers.getSetCookie?.() ?? []).map(c => c.split(';')[0]).find(c => c.startsWith('cairn_session=')) ?? ''
+const originOf = (base: string) => new URL(base).origin
+const authn = (base: string) => new VirtualAuthenticator(originOf(base), new URL(base).hostname)
+
+// Enrols a first passkey (with the one-time code unless `headers` carry another identity).
+async function enrol(base: string, opts: { headers?: Record<string, string>; code?: boolean } = {}): Promise<{ cookie: string; a: VirtualAuthenticator }> {
+  const a = authn(base)
+  const o = await send(base, 'POST', '/api/auth/register-options', { json: opts.code === false ? {} : { bootstrapCode: BOOTSTRAP_CODE }, headers: opts.headers })
+  expect(o.status, o.text).toBe(200)
+  const v = await send(base, 'POST', '/api/auth/register-verify', { json: { challengeId: o.body.challengeId, response: a.register(o.body.options), name: 'Test key' }, headers: opts.headers })
+  expect(v.status, v.text).toBe(200)
+  expect(v.body.signed_in).toBe(true)
+  authenticators.set(base, a)
+  return { cookie: cookieOf(v), a }
+}
+
+async function login(base: string, a: VirtualAuthenticator): Promise<string> {
+  const o = await send(base, 'POST', '/api/auth/login-options', { json: {} })
+  expect(o.status, o.text).toBe(200)
+  const v = await send(base, 'POST', '/api/auth/login-verify', { json: { challengeId: o.body.challengeId, response: a.assert(o.body.options) } })
+  expect(v.status, v.text).toBe(200)
+  return cookieOf(v)
+}
+
+async function sessionFor(base: string): Promise<string> {
+  const have = sessions.get(base)
+  if (have) return have
+  const a = authenticators.get(base)
+  const cookie = a ? await login(base, a) : (await enrol(base)).cookie
+  sessions.set(base, cookie)
+  return cookie
+}
+
+// A fake tailscaled LocalAPI, so the Tailnet path runs for real without a tailnet: it knows
+// the owner's phone, a stranger's, and a tagged server that carries the owner's login.
+let fakeTailscale: Server | null = null
+const TAILNET = { owner: '100.64.0.7', stranger: '100.64.0.8', tagged: '100.64.0.9', nobody: '100.64.0.10' }
+function startFakeTailscale(): Promise<void> {
+  const nodes: Record<string, unknown> = {
+    [TAILNET.owner]: { Node: { Tags: null }, UserProfile: { LoginName: OWNER_LOGIN } },
+    [TAILNET.stranger]: { Node: { Tags: null }, UserProfile: { LoginName: 'stranger@example.test' } },
+    [TAILNET.tagged]: { Node: { Tags: ['tag:server'] }, UserProfile: { LoginName: OWNER_LOGIN } },
+  }
+  fakeTailscale = createServer((req, res) => {
+    const ip = new URL(req.url ?? '', 'http://x').searchParams.get('addr') ?? ''
+    const hit = nodes[ip]
+    res.statusCode = hit ? 200 : 404
+    res.end(hit ? JSON.stringify(hit) : 'no match for IP:port')
+  })
+  rmSync(FAKE_TAILSCALE, { force: true })
+  return new Promise(resolve => fakeTailscale!.listen(FAKE_TAILSCALE, resolve))
+}
+const asTailnet = (ip: string, extra: Record<string, string> = {}) => ({ 'x-forwarded-for': ip, ...extra })
+
 const hex32 = /^[0-9a-f]{32}$/
 const iso = (s: unknown) => typeof s === 'string' && !Number.isNaN(Date.parse(s))
 const between = (n: unknown, lo: number, hi: number) => typeof n === 'number' && n >= lo && n <= hi
-const GET = (base: string, route: string, o?: Parameters<typeof call>[3]) => call(base, 'GET', route, o)
+const GET = (base: string, route: string, o?: CallOpts) => call(base, 'GET', route, o)
 
 const UNKNOWN_BOOT = '0'.repeat(32)
 const BOOT_SCOPED = ['/api/trips/:bootId', '/api/trips/:bootId/events', '/api/trips/:bootId/fuel', '/api/trips/:bootId/insights', '/api/trips/:bootId/route', '/api/trips/:bootId/stops', '/api/trips/:bootId/telemetry', '/api/trips/:bootId/timeline']
 const BOOT_QUERY = ['/api/analytics/telemetry', '/api/analytics/imu', '/api/analytics/drive-summary', '/api/analytics/boost-detail', '/api/analytics/fuel-health']
 
-beforeAll(() => {
-  for (const [name, v] of Object.entries({ CAIRN_WEB_DATA: DATA, CAIRN_WEB_EMPTY: EMPTY, CAIRN_WEB_DOWN: DOWN })) {
+beforeAll(async () => {
+  for (const [name, v] of Object.entries({ CAIRN_WEB_DATA: DATA, CAIRN_WEB_EMPTY: EMPTY, CAIRN_WEB_DOWN: DOWN, CAIRN_SERVICE_TOKEN: SERVICE_TOKEN, CAIRN_BOOTSTRAP_CODE: BOOTSTRAP_CODE, CAIRN_FAKE_TAILSCALE: FAKE_TAILSCALE })) {
     if (!v) throw new Error(`${name} is not set: run tests/staging.sh, which starts the staged instances`)
   }
+  await startFakeTailscale()
+})
+afterAll(() => { fakeTailscale?.close() })
+
+// ─── access control ──────────────────────────────────────────────────────────
+//
+// Nothing answers without an identity: a passkey session, an allowlisted Tailnet device (here a
+// fake tailscaled), or the read-only service token. These run first, so the "no passkey is
+// enrolled yet" cases see a fresh instance.
+
+describe('access control: no identity, no answer', () => {
+  const placeholders = { bootId: UNKNOWN_BOOT, id: '1' }
+
+  it('every route outside /api/auth refuses an anonymous caller with 401 and no data', async () => {
+    for (const r of inventory.filter(x => !x.path.startsWith('/api/auth/'))) {
+      const res = await call(DATA, r.method, r.path, { params: placeholders, query: { boot_id: UNKNOWN_BOOT }, auth: 'none', ...(r.method === 'GET' ? {} : { json: {} }) })
+      expect(res.status, `${r.method} ${r.path}`).toBe(401)
+      expect(res.body, `${r.method} ${r.path}`).toMatchObject({ error: true, statusMessage: 'authentication required' })
+      expect(Object.keys(res.body).sort(), `${r.method} ${r.path}`).toEqual(['error', 'message', 'statusCode', 'statusMessage', 'url'])
+    }
+  })
+
+  it('pages redirect to the sign-in page, which is itself reachable', async () => {
+    for (const page of ['/', '/trips', '/places', '/system']) {
+      const r = await send(DATA, 'GET', page)
+      expect(r.status, page).toBe(302)
+      expect(r.headers.get('location'), page).toBe(`/login?next=${encodeURIComponent(page)}`)
+      expect(r.text, page).not.toContain('__NUXT_DATA__')
+    }
+    expect((await send(DATA, 'GET', '/login')).status).toBe(200)
+  })
+
+  it('refuses a wrong token, another scheme and a made-up session', async () => {
+    expect((await GET(DATA, '/api/trips', { auth: 'none', headers: { authorization: 'Bearer nope' } })).status).toBe(401)
+    expect((await GET(DATA, '/api/trips', { auth: 'none', headers: { authorization: `Basic ${SERVICE_TOKEN}` } })).status).toBe(401)
+    expect((await GET(DATA, '/api/trips', { auth: 'none', headers: { cookie: 'cairn_session=made-up' } })).status).toBe(401)
+    // a wrong token is not rescued by a valid-looking Tailnet address
+    expect((await GET(DATA, '/api/trips', { auth: 'none', headers: { authorization: 'Bearer nope', ...asTailnet(TAILNET.owner) } })).status).toBe(401)
+  })
+
+  it('the service token reads, and cannot write or manage credentials', async () => {
+    expect((await GET(DATA, '/api/trips')).status).toBe(200)
+    const w = await call(DATA, 'POST', '/api/places/saved', { auth: 'service', json: { name: 'Nope', lat: 1, lon: 1 } })
+    expect(w.status).toBe(403)
+    expect(w.body.statusMessage).toBe('this credential is read-only')
+    expect((await GET(DATA, '/api/auth/passkeys')).status).toBe(403)
+    expect((await GET(DATA, '/api/auth/audit')).status).toBe(403)
+  })
+
+  it('tells an anonymous caller how to sign in, and nothing else', async () => {
+    const r = await GET(DATA, '/api/auth/session', { auth: 'none' })
+    expect(r.status).toBe(200)
+    expect(r.body).toEqual({ authenticated: false, method: null, actor: null, fresh: false, passkeys: 0, can_enrol: true, auth: 'required' })
+    expect(r.text).not.toContain(OWNER_LOGIN)
+  })
+
+  it('cannot start a first passkey without the code on the host or an allowed Tailnet device', async () => {
+    const attempts: Record<string, string>[] = [{}, asTailnet(TAILNET.stranger), asTailnet(TAILNET.tagged), asTailnet(TAILNET.nobody)]
+    for (const headers of attempts) {
+      const r = await send(DATA, 'POST', '/api/auth/register-options', { json: {}, headers })
+      expect(r.status, JSON.stringify(headers)).toBe(401)
+    }
+    const wrong = await send(DATA, 'POST', '/api/auth/register-options', { json: { bootstrapCode: 'not-the-code' } })
+    expect(wrong.status).toBe(401)
+    expect((await GET(DATA, '/api/auth/session', { auth: 'none' })).body.passkeys).toBe(0)
+  })
+
+  it('cannot sign in with a passkey that was never enrolled', async () => {
+    expect((await send(DATA, 'POST', '/api/auth/login-options', { json: {} })).status).toBe(409)
+  })
+})
+
+describe('access control: a Tailnet device enrols the first passkey', () => {
+  it('the owner\'s device can; the session it gets works', async () => {
+    const { cookie } = await enrol(DOWN, { headers: asTailnet(TAILNET.owner), code: false })
+    expect(cookie).toMatch(/^cairn_session=/)
+    sessions.set(DOWN, cookie)
+    const me = await send(DOWN, 'GET', '/api/auth/session', { headers: { cookie } })
+    expect(me.body).toMatchObject({ authenticated: true, method: 'passkey', fresh: true, passkeys: 1, can_enrol: false })
+  })
+})
+
+describe('access control: passkeys', () => {
+  let first: { cookie: string; a: VirtualAuthenticator }
+
+  it('a first passkey with the code on the host signs the owner in, and the code is then spent', async () => {
+    first = await enrol(EMPTY)
+    const me = await send(EMPTY, 'GET', '/api/auth/session', { headers: { cookie: first.cookie } })
+    expect(me.body).toMatchObject({ authenticated: true, method: 'passkey', actor: 'owner', fresh: true, passkeys: 1 })
+    const again = await send(EMPTY, 'POST', '/api/auth/register-options', { json: { bootstrapCode: BOOTSTRAP_CODE } })
+    expect(again.status).toBe(401)
+  })
+
+  it('the session cookie is HttpOnly and SameSite=Strict', async () => {
+    const o = await send(EMPTY, 'POST', '/api/auth/login-options', { json: {} })
+    const v = await send(EMPTY, 'POST', '/api/auth/login-verify', { json: { challengeId: o.body.challengeId, response: first.a.assert(o.body.options) } })
+    const set = v.headers.getSetCookie().find(c => c.startsWith('cairn_session='))!
+    expect(set).toMatch(/HttpOnly/i)
+    expect(set).toMatch(/SameSite=Strict/i)
+    expect(set).toMatch(/Path=\//)
+    expect(set).toMatch(/Max-Age=\d{6,}/)
+  })
+
+  it('refuses a bad assertion: tampered signature, wrong origin, no user verification, replayed or unknown challenge', async () => {
+    const bad = async (over: Parameters<VirtualAuthenticator['assert']>[1]) => {
+      const o = await send(EMPTY, 'POST', '/api/auth/login-options', { json: {} })
+      return send(EMPTY, 'POST', '/api/auth/login-verify', { json: { challengeId: o.body.challengeId, response: first.a.assert(o.body.options, over) } })
+    }
+    expect((await bad({ tamper: true })).status).toBe(401)
+    expect((await bad({ origin: 'https://evil.example' })).status).toBe(401)
+    expect((await bad({ flags: 0x01 })).status).toBe(401)
+
+    const o = await send(EMPTY, 'POST', '/api/auth/login-options', { json: {} })
+    const response = first.a.assert(o.body.options)
+    const ok = await send(EMPTY, 'POST', '/api/auth/login-verify', { json: { challengeId: o.body.challengeId, response } })
+    expect(ok.status).toBe(200)
+    // the same answer again: the challenge was spent
+    expect((await send(EMPTY, 'POST', '/api/auth/login-verify', { json: { challengeId: o.body.challengeId, response } })).status).toBe(400)
+    expect((await send(EMPTY, 'POST', '/api/auth/login-verify', { json: { challengeId: 'made-up', response } })).status).toBe(400)
+    // a credential the server never saw
+    const o2 = await send(EMPTY, 'POST', '/api/auth/login-options', { json: {} })
+    const stranger = authn(EMPTY)
+    expect((await send(EMPTY, 'POST', '/api/auth/login-verify', { json: { challengeId: o2.body.challengeId, response: stranger.assert(o2.body.options) } })).status).toBe(401)
+  })
+
+  it('a second passkey needs a fresh passkey session; a stolen or ambient identity cannot add one', async () => {
+    expect((await send(EMPTY, 'POST', '/api/auth/register-options', { json: {} })).status).toBe(401)
+    const withService = await send(EMPTY, 'POST', '/api/auth/register-options', { json: {}, headers: { authorization: `Bearer ${SERVICE_TOKEN}` } })
+    expect(withService.status).toBe(401)
+
+    const cookie = await login(EMPTY, first.a)
+    const second = authn(EMPTY)
+    const o = await send(EMPTY, 'POST', '/api/auth/register-options', { json: {}, headers: { cookie } })
+    expect(o.status, o.text).toBe(200)
+    // the first passkey is excluded from the new registration
+    expect(o.body.options.excludeCredentials.map((c: any) => c.id)).toContain(first.a.id)
+    const v = await send(EMPTY, 'POST', '/api/auth/register-verify', { json: { challengeId: o.body.challengeId, response: second.register(o.body.options), name: 'Second key' }, headers: { cookie } })
+    expect(v.status, v.text).toBe(200)
+    expect(v.body.signed_in).toBe(false)
+    const list = await send(EMPTY, 'GET', '/api/auth/passkeys', { headers: { cookie } })
+    expect(list.body.passkeys.map((p: any) => p.name).sort()).toEqual(['Second key', 'Test key'])
+    expect(JSON.stringify(list.body)).not.toMatch(/public_key|publicKey/)
+
+    // removing the first passkey ends the sessions it started, and the other still signs in
+    const gone = await send(EMPTY, 'DELETE', '/api/auth/passkeys/:id', { params: { id: first.a.id }, headers: { cookie } })
+    expect(gone.status, gone.text).toBe(200)
+    expect((await send(EMPTY, 'GET', '/api/auth/session', { headers: { cookie } })).body.authenticated).toBe(false)
+    expect((await send(EMPTY, 'DELETE', '/api/auth/passkeys/:id', { params: { id: 'no-such-passkey' }, headers: { cookie: await login(EMPTY, second) } })).status).toBe(404)
+    authenticators.set(EMPTY, second)
+    sessions.delete(EMPTY)
+  })
+
+  it('signing out ends the session', async () => {
+    const cookie = await login(EMPTY, authenticators.get(EMPTY)!)
+    expect((await GET(EMPTY, '/api/auth/passkeys', { auth: 'none', headers: { cookie } })).status).toBe(200)
+    expect((await send(EMPTY, 'POST', '/api/auth/logout', { json: {}, headers: { cookie } })).status).toBe(200)
+    expect((await GET(EMPTY, '/api/auth/passkeys', { auth: 'none', headers: { cookie } })).status).toBe(401)
+  })
+
+  it('records who did what, by field name, and never a secret', async () => {
+    const r = await send(EMPTY, 'GET', '/api/auth/audit', { headers: { cookie: await sessionFor(EMPTY) } })
+    expect(r.status).toBe(200)
+    const actions = r.body.audit.map((a: any) => a.action)
+    expect(actions).toEqual(expect.arrayContaining(['passkey-added', 'login', 'login-failed', 'passkey-removed', 'logout']))
+    for (const a of r.body.audit) expect(Object.keys(a).sort()).toEqual(['action', 'actor', 'id', 'method', 'target', 'ts'])
+    for (const secret of [BOOTSTRAP_CODE, SERVICE_TOKEN, 'cairn_session=']) expect(r.text).not.toContain(secret)
+  })
+})
+
+describe('access control: Tailnet identity', () => {
+  it('lets an allowlisted device in, and no one else', async () => {
+    expect((await GET(DATA, '/api/trips', { auth: 'none', headers: asTailnet(TAILNET.owner) })).status).toBe(200)
+    for (const [who, ip] of Object.entries({ stranger: TAILNET.stranger, tagged: TAILNET.tagged, nobody: TAILNET.nobody })) {
+      expect((await GET(DATA, '/api/trips', { auth: 'none', headers: asTailnet(ip) })).status, who).toBe(401)
+    }
+    // an allowlisted address that is not the real peer: a client claiming it from a non-proxy is
+    // not tested here (this suite is the proxy); the unit tests cover clientIp
+    expect((await GET(DATA, '/api/trips', { auth: 'none', headers: asTailnet(`${TAILNET.stranger}, ${TAILNET.owner}`) })).status).toBe(200)
+    expect((await GET(DATA, '/api/trips', { auth: 'none', headers: asTailnet(`${TAILNET.owner}, ${TAILNET.stranger}`) })).status).toBe(401)
+  })
+
+  it('renders pages, whose data is fetched by the server for the signed-in caller', async () => {
+    for (const headers of [asTailnet(TAILNET.owner), { authorization: `Bearer ${SERVICE_TOKEN}` }]) {
+      const r = await send(DATA, 'GET', '/trips', { headers })
+      expect(r.status).toBe(200)
+      expect(r.text).toMatch(/<html/i)
+      // the page's own data calls were answered, not refused: no 401 inside the payload
+      expect(r.text).not.toContain('authentication required')
+      expect(r.text).toContain('__NUXT_DATA__')
+    }
+  })
+
+  it('can change saved places, but cannot manage credentials: that needs a fresh passkey', async () => {
+    // got past authentication: an unknown id is a 404, and nothing was written
+    const patch = await send(DATA, 'PATCH', '/api/places/saved/:id', { params: { id: '999999' }, json: { name: 'x' }, headers: asTailnet(TAILNET.owner) })
+    expect(patch.status).toBe(404)
+    await sessionFor(DATA)   // a passkey now exists
+    const add = await send(DATA, 'POST', '/api/auth/register-options', { json: {}, headers: asTailnet(TAILNET.owner) })
+    expect(add.status).toBe(401)
+    expect(add.body.statusMessage).toBe('reauth_required')
+    const del = await send(DATA, 'DELETE', '/api/auth/passkeys/:id', { params: { id: authenticators.get(DATA)!.id }, headers: asTailnet(TAILNET.owner) })
+    expect(del.status).toBe(401)
+    expect(del.body.statusMessage).toBe('reauth_required')
+    expect((await send(DATA, 'GET', '/api/auth/passkeys', { headers: asTailnet(TAILNET.owner) })).status).toBe(200)
+  })
+})
+
+describe('access control: cross-site requests', () => {
+  const base = () => new URL(DATA).host
+  it('refuses a cross-site write, whoever the browser is signed in as', async () => {
+    const cookie = await sessionFor(DATA)
+    const writes: Record<string, string>[] = [
+      { 'sec-fetch-site': 'cross-site' },
+      { 'sec-fetch-site': 'same-site' },
+      { origin: 'https://evil.example' },
+      { origin: 'null' },
+    ]
+    for (const extra of writes) {
+      for (const who of [{ cookie }, asTailnet(TAILNET.owner)]) {
+        const r = await send(DATA, 'PATCH', '/api/places/saved/:id', { params: { id: '999999' }, json: { name: 'x' }, headers: { ...who, ...extra } })
+        expect(r.status, JSON.stringify([who, extra])).toBe(403)
+        expect(r.body.statusMessage).toBe('cross-site request refused')
+      }
+    }
+  })
+  it('allows the same origin, and reads from anywhere', async () => {
+    const cookie = await sessionFor(DATA)
+    const same = await send(DATA, 'PATCH', '/api/places/saved/:id', { params: { id: '999999' }, json: { name: 'x' }, headers: { cookie, origin: DATA, 'sec-fetch-site': 'same-origin', host: base() } })
+    expect(same.status).toBe(404)
+    expect((await GET(DATA, '/api/trips', { auth: 'none', headers: { cookie, origin: 'https://evil.example', 'sec-fetch-site': 'cross-site' } })).status).toBe(200)
+  })
+  it('refuses a cross-site sign-in attempt too', async () => {
+    const r = await send(DATA, 'POST', '/api/auth/login-options', { json: {}, headers: { origin: 'https://evil.example' } })
+    expect(r.status).toBe(403)
+  })
 })
 
 // ─── representative data ─────────────────────────────────────────────────────
@@ -406,7 +719,7 @@ describe('bad input', () => {
     for (const sql of ['select 1 as one', 'select * from position', 'drop table position']) {
       const r = await fetch(DATA + '/api/analytics/query', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${SERVICE_TOKEN}` },
         body: JSON.stringify({ sql }),
         signal: AbortSignal.timeout(30_000),
       })
@@ -426,7 +739,7 @@ describe('missing capability: the store is not there', () => {
   const fakeBoot = { bootId: UNKNOWN_BOOT }
 
   it('every store-backed route answers 502 "store unreachable": a JSON error, quickly', async () => {
-    const routes = inventory.filter(r => r.method === 'GET' && !r.path.startsWith('/api/places/saved'))
+    const routes = inventory.filter(r => r.method === 'GET' && !r.path.startsWith('/api/places/saved') && !r.path.startsWith('/api/auth/'))
     for (const r of routes) {
       const started = Date.now()
       const res = await GET(DOWN, r.path, { params: fakeBoot, query: { boot_id: UNKNOWN_BOOT } })

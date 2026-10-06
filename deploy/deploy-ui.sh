@@ -111,12 +111,12 @@ sleep 4
 WALK_DIR="$(ssh "$HOST" 'mktemp -d')"
 trap 'ssh "$HOST" "rm -rf $WALK_DIR" 2>/dev/null || true; [ -z "${TMP:-}" ] || rm -rf "$TMP"' EXIT
 scp -q "$BUILD_DIR/tests/walk-routes.sh" "$BUILD_DIR/tests/routes.json" "$HOST:$WALK_DIR/"
-EMPTY=""
-if ! ssh "$HOST" "curl -fsS localhost:3000/api/trips" | grep -q '"boot_id"'; then
-  EMPTY="--empty"
-  echo "    the store lists no trips; walking with --empty"
-fi
-if ! ssh "$HOST" "bash $WALK_DIR/walk-routes.sh $EMPTY http://localhost:3000"; then
+# Every route needs an identity: the walk uses the read-only service token the service keeps in
+# its state directory (read here by root, on the host, and never printed).
+TOKEN_FILE=/var/lib/cairn-ui/service-token
+WALK_ENV="CAIRN_TOKEN_FILE=$TOKEN_FILE"
+ssh "$HOST" "sudo test -s $TOKEN_FILE" || { echo "==> No $TOKEN_FILE on the host yet: the service creates it on start. Is cairn-ui running?" >&2; exit 1; }
+if ! ssh "$HOST" "sudo env $WALK_ENV bash $WALK_DIR/walk-routes.sh --detect-empty http://localhost:3000"; then
   echo "==> The deploy is up but the routes listed above failed (each FAIL line names its route)."
   exit 1
 fi

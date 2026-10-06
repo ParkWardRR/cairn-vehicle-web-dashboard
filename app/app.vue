@@ -2,6 +2,8 @@
 const ui = useUiStore()
 const route = useRoute()
 const storeDown = useStoreDown()
+// The sign-in page stands alone: no navigation, no data banner.
+const bare = computed(() => route.path === '/login')
 const retrying = ref(false)
 
 async function retryStore() {
@@ -33,7 +35,8 @@ function isActive(path: string) {
 </script>
 
 <template>
-  <div class="min-h-screen" style="background-color: var(--color-bg)">
+  <NuxtPage v-if="bare" />
+  <div v-else class="min-h-screen" style="background-color: var(--color-bg)">
     <!-- Desktop sidebar -->
     <LayoutSidebarNav class="hidden md:flex" />
 

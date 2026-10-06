@@ -72,8 +72,17 @@ echo "==> starting the staged instances"
 "$STAGE/bin/cairn-tsdb-demo" -empty -addr "127.0.0.1:$STORE_EMPTY" >"$RUN/store-empty.log" 2>&1 & pids+=($!)
 
 SQL_LOG="$RUN/sql.log"
+# Every instance requires authentication, as in production. The suite is given the read-only
+# service token and the one-time enrolment code; a fake tailscaled (the suite serves it on this
+# socket) stands in for the tailnet.
+SERVICE_TOKEN="$(openssl rand -hex 24)"
+BOOTSTRAP_CODE="$(openssl rand -hex 8)"
+FAKE_TAILSCALE="$RUN/ts.sock"
 web() { # port store-port places-dir
   CAIRN_SQL_LOG="$([ "$CAPTURE" = 1 ] && [ "$1" = "$WEB_DATA" ] && echo "$SQL_LOG")" \
+  NUXT_AUTH_SERVICE_TOKEN="$SERVICE_TOKEN" NUXT_AUTH_BOOTSTRAP_CODE="$BOOTSTRAP_CODE" \
+  NUXT_AUTH_ORIGINS="http://127.0.0.1:$1" NUXT_AUTH_TAILNET_USERS="owner@example.test" \
+  NUXT_AUTH_TAILSCALE_SOCKET="$FAKE_TAILSCALE" \
   NITRO_PORT="$1" NITRO_HOST=127.0.0.1 NUXT_TSDB_URL="http://127.0.0.1:$2" \
     NUXT_PLACES_EXTERNAL=false NUXT_PLACES_DATA_DIR="$3" \
     node .output/server/index.mjs >"$RUN/web-$1.log" 2>&1 &
@@ -85,9 +94,11 @@ web "$WEB_DOWN"  "$STORE_NONE"  "$RUN/places-down"   # nothing listens on STORE_
 
 wait_for "http://127.0.0.1:$STORE_DATA/healthz"
 wait_for "http://127.0.0.1:$STORE_EMPTY/healthz"
-wait_for "http://127.0.0.1:$WEB_DATA/api/vehicles"
-wait_for "http://127.0.0.1:$WEB_EMPTY/api/vehicles"
-curl -sS -o /dev/null "http://127.0.0.1:$WEB_DOWN/api/device/tsdb-status" || { echo "the web instance over the missing store did not start" >&2; exit 1; }
+authed() { curl -fsS -o /dev/null -H "Authorization: Bearer $SERVICE_TOKEN" "$1" 2>/dev/null; }
+wait_authed() { for _ in $(seq 1 120); do authed "$1" && return 0; sleep 0.5; done; echo "timed out waiting for $1" >&2; return 1; }
+wait_authed "http://127.0.0.1:$WEB_DATA/api/vehicles"
+wait_authed "http://127.0.0.1:$WEB_EMPTY/api/vehicles"
+curl -sS -o /dev/null -H "Authorization: Bearer $SERVICE_TOKEN" "http://127.0.0.1:$WEB_DOWN/api/device/tsdb-status" || { echo "the web instance over the missing store did not start" >&2; exit 1; }
 
 echo "==> running the acceptance suite"
 set +e
@@ -95,6 +106,7 @@ CAIRN_WEB_DATA="http://127.0.0.1:$WEB_DATA" \
 CAIRN_WEB_EMPTY="http://127.0.0.1:$WEB_EMPTY" \
 CAIRN_WEB_DOWN="http://127.0.0.1:$WEB_DOWN" \
 CAIRN_WEB_PLACES="$RUN/places-data" \
+CAIRN_SERVICE_TOKEN="$SERVICE_TOKEN" CAIRN_BOOTSTRAP_CODE="$BOOTSTRAP_CODE" CAIRN_FAKE_TAILSCALE="$FAKE_TAILSCALE" \
   npm run test:acceptance
 rc=$?
 set -e
