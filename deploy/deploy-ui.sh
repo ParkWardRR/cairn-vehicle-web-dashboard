@@ -3,6 +3,8 @@
 #
 #   deploy/deploy-ui.sh            build the committed code (HEAD) and deploy it
 #   deploy/deploy-ui.sh --dirty    build the working tree, uncommitted changes and all
+#   deploy/deploy-ui.sh --with-fsq also build and install tools/cairn-fsq on the host
+#                                  (deploy/install-fsq.sh does only that)
 #
 # The default builds from a clean export of HEAD so that what is deployed is what
 # is committed. Building the working tree ships anything half-finished in it, and
@@ -17,7 +19,16 @@ ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 [ -f "$ROOT/deploy.env" ] && . "$ROOT/deploy.env"
 HOST="${CAIRN_DEPLOY_HOST:?set CAIRN_DEPLOY_HOST (user@host), or put it in deploy.env}"
 
-if [ "${1:-}" = "--dirty" ]; then
+DIRTY=0; WITH_FSQ=0
+for a in "$@"; do
+  case "$a" in
+    --dirty) DIRTY=1 ;;
+    --with-fsq) WITH_FSQ=1 ;;
+    *) echo "unknown option: $a" >&2; exit 2 ;;
+  esac
+done
+
+if [ "$DIRTY" = 1 ]; then
   echo "==> Building Nuxt UI from the working tree (uncommitted changes included)..."
   BUILD_DIR="$ROOT"
   (cd "$BUILD_DIR" && npm run build)
@@ -78,5 +89,7 @@ if ! ssh "$HOST" "bash $WALK_DIR/walk-routes.sh $EMPTY http://localhost:3000"; t
   echo "==> The deploy is up but the routes listed above failed (each FAIL line names its route)."
   exit 1
 fi
+
+if [ "$WITH_FSQ" = 1 ]; then "$SCRIPT_DIR/install-fsq.sh"; fi
 
 echo "==> Done."

@@ -39,6 +39,10 @@ it drifts from `server/api`.
 `CAIRN_DEPLOY_HOST` or a gitignored `deploy.env`; the real Caddy site goes in a gitignored
 `deploy/caddy/Caddyfile` (copy `Caddyfile.example`). No host name is stored in this repository.
 
+`deploy/install-fsq.sh` (or `deploy/deploy-ui.sh --with-fsq`) builds the `cairn-fsq` place-extract tool on the host
+(DuckDB links through cgo, so the host needs go and gcc) and installs it as `/usr/local/bin/cairn-fsq`, keeping
+the previous binary as `.prev`.
+
 ## What it is pinned to
 
 `contracts.lock` pins the protocol release (the store schema this layer queries is `store/v1`). `server.lock`
