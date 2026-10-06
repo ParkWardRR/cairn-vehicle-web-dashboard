@@ -8,6 +8,21 @@ const { data: keys, refresh: refreshKeys } = await useFetch<{ passkeys: Array<{ 
 const { data: trail, refresh: refreshTrail } = await useFetch<{ audit: Array<{ id: number; ts: number; actor: string; method: string; action: string; target: string | null }> }>('/api/auth/audit', { immediate: Boolean(human.value) })
 
 const name = ref('')
+const restoreMsg = ref('')
+async function restore(e: Event) {
+  const f = (e.target as HTMLInputElement).files?.[0]
+  restoreMsg.value = ''
+  error.value = ''
+  if (!f) return
+  try {
+    const r = await $fetch<any>('/api/data/import', { method: 'POST', body: JSON.parse(await f.text()) })
+    restoreMsg.value = `Restored: ${r.saved_places.added} places added (${r.saved_places.skipped} already there), ${r.trip_marks.changed} trips updated.`
+  } catch (err: any) {
+    error.value = err instanceof SyntaxError ? 'That file is not a Cairn export.' : errorText(err)
+  } finally {
+    (e.target as HTMLInputElement).value = ''
+  }
+}
 const busy = ref(false)
 const error = ref('')
 const when = (ms: number | null) => (ms ? new Date(ms).toLocaleString() : 'never')
@@ -59,6 +74,16 @@ const remove = (id: string) => withFresh(() => $fetch(`/api/auth/passkeys/${enco
           <button class="rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50" :disabled="busy" style="background: var(--color-accent); color: white" @click="add">Add a passkey</button>
         </div>
         <p v-if="error" role="alert" class="text-[13px] mt-3" style="color: var(--color-danger, #f87171)">{{ error }}</p>
+      </section>
+
+      <section class="mb-8">
+        <h2 class="text-sm font-semibold mb-3">Your data</h2>
+        <p class="text-[13px] mb-3" style="color: var(--color-text-secondary)">Your saved places and the notes, tags and bookmarks on your trips, in one file. Restoring merges: nothing already here is overwritten by an older copy.</p>
+        <div class="flex flex-wrap items-center gap-3">
+          <a href="/api/data/export" download class="px-4 py-2 rounded-lg text-sm font-medium border" style="border-color: var(--color-border)">Download everything</a>
+          <label class="px-4 py-2 rounded-lg text-sm font-medium border cursor-pointer" style="border-color: var(--color-border)">Restore from a file<input type="file" accept="application/json,.json" class="sr-only" @change="restore"></label>
+        </div>
+        <p v-if="restoreMsg" role="status" class="text-[13px] mt-3">{{ restoreMsg }}</p>
       </section>
 
       <section class="mb-8">

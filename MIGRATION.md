@@ -18,7 +18,7 @@ to the paths this repository owns.
 |---|---|
 | `ui/` | the directory's contents become the repository root |
 | `deploy/deploy-ui.sh` | `deploy/deploy-ui.sh` |
-| `deploy/backup-places.sh` | `deploy/backup-places.sh` |
+| `deploy/backup-places.sh` | `deploy/backup-data.sh` (generalised to every store with user data) |
 | `deploy/caddy/` | `deploy/caddy/` |
 | `deploy/systemd/cairn-ui.service` | `deploy/systemd/cairn-ui.service` |
 | `deploy/systemd/cairn-ui-places.conf` | `deploy/systemd/cairn-ui-places.conf` |

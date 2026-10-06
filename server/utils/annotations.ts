@@ -53,15 +53,17 @@ export class AnnotationStore {
   private db: DatabaseSync
   private mirror: string
 
+  // dir ':memory:' is a scratch store with no files, used to check an import before it is applied.
   constructor(dir: string) {
-    mkdirSync(dir, { recursive: true })
-    const file = join(dir, 'annotations.sqlite')
-    this.mirror = join(dir, 'annotations.json')
-    const fresh = !existsSync(file)
+    const scratch = dir === ':memory:'
+    if (!scratch) mkdirSync(dir, { recursive: true })
+    const file = scratch ? ':memory:' : join(dir, 'annotations.sqlite')
+    this.mirror = scratch ? '' : join(dir, 'annotations.json')
+    const fresh = scratch || !existsSync(file)
     this.db = new DatabaseSync(file)
     this.db.exec('PRAGMA journal_mode=WAL')
     this.db.exec(SCHEMA)
-    if (fresh && existsSync(this.mirror)) this.merge(JSON.parse(readFileSync(this.mirror, 'utf8')).annotations ?? [], false)
+    if (fresh && this.mirror && existsSync(this.mirror)) this.merge(JSON.parse(readFileSync(this.mirror, 'utf8')).annotations ?? [], false)
   }
 
   private rows(where = '', ...args: any[]): Annotation[] {
@@ -179,6 +181,7 @@ export class AnnotationStore {
   }
 
   private writeMirror() {
+    if (!this.mirror) return
     const tmp = `${this.mirror}.tmp`
     writeFileSync(tmp, JSON.stringify(this.export(), null, 1), { mode: 0o600 })
     renameSync(tmp, this.mirror)

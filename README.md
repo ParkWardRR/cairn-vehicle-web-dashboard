@@ -26,6 +26,27 @@ to keep every coordinate local.
 Every route and page needs an identity: a passkey session, an allowlisted Tailnet device, or the read-only service
 token. See [docs/auth.md](docs/auth.md). `npm run dev` needs `NUXT_AUTH_MODE=off` (local development only).
 
+## Your data
+
+The web layer keeps what you make in `/var/lib/cairn-ui/` (`NUXT_PLACES_DATA_DIR`). Every store, and how to get it
+out and back in:
+
+| Store | What | Export | Restore | Rebuilt if lost? |
+| --- | --- | --- | --- | --- |
+| `saved-places.sqlite` | places you named or confirmed, places learned from repeat visits, spots you rejected | Places page ▸ Export, or `GET /api/places/saved/export` | Places page ▸ Import (a merge: places already there are skipped); lost database restored from `saved-places.json` on start | No |
+| `annotations.sqlite` | bookmarks, tags and notes on trips | `GET /api/annotations/export` | `POST /api/annotations/import` (a merge: older never overwrites newer); restored from `annotations.json` on start | No |
+| both of the above | | `GET /api/data/export` (one file) | `POST /api/data/import` (checked as a whole before anything changes) | No |
+| `places.sqlite` | lookup cache and visit history | not needed | none | Yes: names are looked up again, visits rebuilt from the trips in the store |
+| `auth.sqlite` | passkeys (public keys), sessions, the audit trail | included in `deploy-ui.sh --snapshot` (root-only) | restore the snapshot, or create a passkey again (see [docs/auth.md](docs/auth.md)) | Passkeys can be re-enrolled; sessions are simply signed out |
+
+`deploy/backup-data.sh` copies the JSON mirrors and dated copies to your laptop (it only reads). A snapshot before a
+deploy (`deploy-ui.sh --snapshot`) copies all of it, and restore-tests the copy. These files hold real locations:
+keep them out of version control.
+
+Pictures: the trip page can save a high-resolution picture of a trip's route. It is drawn in your browser with no
+map tiles, so nothing is sent to anyone, and it leaves out the start and end of the trip and anything inside a
+home, work, school, health, friends or worship place you have saved (see `shared/utils/redact.ts`).
+
 ## Test
 
 ```sh

@@ -294,6 +294,7 @@ function insightIcon(icon: string | undefined): string {
     <!-- Header -->
     <LayoutPageHeader title="Trip Detail" :subtitle="trip ? formatDate(trip.start?.observed_at) : `Boot: ${bootId.slice(0, 12)}…`">
       <template #actions>
+        <TripsTripImageButton :boot-id="bootId" />
         <NuxtLink
           to="/trips"
           class="inline-flex items-center gap-2 px-3.5 py-2 text-[13px] font-medium rounded-xl transition-colors hover:bg-[var(--color-surface-elevated)]"

@@ -756,6 +756,143 @@ describe('history: statistics for any period, and marks on trips', () => {
   })
 })
 
+// ─── your data: pictures, export and restore ─────────────────────────────────
+
+describe('your data: shareable pictures and backup', () => {
+  const metres = (a: [number, number], b: [number, number]) => {
+    const dx = (b[1] - a[1]) * Math.cos(a[0] * Math.PI / 180) * 111320, dy = (b[0] - a[0]) * 110540
+    return Math.hypot(dx, dy)
+  }
+  let boot = ''
+  let track: Array<[number, number]> = []   // [lat, lon] of the whole drive, as the store has it
+
+  beforeAll(async () => {
+    const trips = (await GET(DATA, '/api/trips', { query: { limit: '200', sort: '-duration_s' } })).body.trips
+    boot = trips[0].boot_id
+    const route = (await GET(DATA, '/api/trips/:bootId/route', { params: { bootId: boot } })).body
+    track = route.features[0].geometry.coordinates.map((c: number[]) => [c[1], c[0]])
+  })
+
+  it('draws the route without its true start and end, and carries nothing else about the trip', async () => {
+    const r = await GET(DATA, '/api/trips/:bootId/image-data', { params: { bootId: boot } })
+    expect(r.status, r.text).toBe(200)
+    const pts: Array<[number, number]> = r.body.segments.flat().map((p: any) => [p.lat, p.lon])
+    expect(pts.length).toBeGreaterThan(10)
+    for (const p of pts) {
+      expect(metres(p, track[0]), 'start').toBeGreaterThanOrEqual(299)
+      expect(metres(p, track[track.length - 1]), 'end').toBeGreaterThanOrEqual(299)
+    }
+    expect(r.body.redaction).toMatchObject({ trim_m: 300, zones: 0 })
+    expect(r.body.summary.day).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    // only a day, a few totals and the line: no id, no time of day, no per-point time
+    expect(r.text).not.toContain(boot)
+    expect(r.text).not.toMatch(/\d{2}:\d{2}:\d{2}/)
+    expect(Object.keys(r.body).sort()).toEqual(['redaction', 'segments', 'summary'])
+    for (const p of r.body.segments.flat()) expect(Object.keys(p).sort()).toEqual(['lat', 'lon', 'speed_kph'])
+  })
+
+  it('asks for more hidden at each end, but never less than the minimum', async () => {
+    const n = async (trim: string) => (await GET(DATA, '/api/trips/:bootId/image-data', { params: { bootId: boot }, query: { trim } })).body
+    const base = await n('300')
+    expect((await n('0')).redaction.trim_m).toBe(300)
+    expect((await n('-50')).redaction.trim_m).toBe(300)
+    expect((await n('junk')).redaction.trim_m).toBe(300)
+    expect((await n('99999')).redaction.trim_m).toBe(2000)
+    const wide = await n('1000')
+    expect(wide.redaction.trim_m).toBe(1000)
+    expect(wide.segments.flat().length).toBeLessThan(base.segments.flat().length)
+  })
+
+  it('removes everything near a saved home, wherever in the trip it is, and says a zone applied', async () => {
+    const mid = track[Math.floor(track.length / 2)]
+    const made = await call(DATA, 'POST', '/api/places/saved', { json: { name: 'Acceptance home', lat: mid[0], lon: mid[1], category: 'home', radius_m: 150 } })
+    expect(made.status, made.text).toBe(200)
+    try {
+      const r = await GET(DATA, '/api/trips/:bootId/image-data', { params: { bootId: boot } })
+      expect(r.body.redaction.zones).toBe(1)
+      for (const p of r.body.segments.flat()) expect(metres([p.lat, p.lon], mid), 'inside the zone').toBeGreaterThan(250)
+      expect(r.body.segments.length).toBeGreaterThanOrEqual(1)
+      // a place that is not private does not hide anything
+      const food = await call(DATA, 'POST', '/api/places/saved', { json: { name: 'Acceptance cafe', lat: track[10][0], lon: track[10][1], category: 'food' } })
+      expect((await GET(DATA, '/api/trips/:bootId/image-data', { params: { bootId: boot } })).body.redaction.zones).toBe(1)
+      await call(DATA, 'DELETE', '/api/places/saved/:id', { params: { id: String(food.body.saved.id) } })
+    } finally {
+      await call(DATA, 'DELETE', '/api/places/saved/:id', { params: { id: String(made.body.saved.id) } })
+    }
+  })
+
+  it('refuses a bad or unknown trip', async () => {
+    expect((await GET(DATA, '/api/trips/:bootId/image-data', { params: { bootId: 'not-a-boot-id' } })).status).toBe(400)
+    expect((await GET(DATA, '/api/trips/:bootId/image-data', { params: { bootId: UNKNOWN_BOOT } })).status).toBe(404)
+    expect((await GET(DATA, '/api/trips/:bootId/image-data', { params: { bootId: boot }, auth: 'none' })).status).toBe(401)
+  })
+
+  it('exports everything in one file and restores it into a scratch instance, repeatably', async () => {
+    // something of each kind in the source
+    const place = await call(DATA, 'POST', '/api/places/saved', { json: { name: 'Backup test place', lat: 36.61, lon: -121.88, category: 'groceries' } })
+    await call(DATA, 'PUT', '/api/annotations/:bootId', { params: { bootId: boot }, json: { bookmarked: true, tags: ['backup'], note: 'restore me' } })
+    try {
+      const exp = await GET(DATA, '/api/data/export')
+      expect(exp.status).toBe(200)
+      expect(exp.headers.get('content-disposition')).toMatch(/attachment; filename="cairn-data-\d{4}-\d{2}-\d{2}\.json"/)
+      expect(exp.body).toMatchObject({ kind: 'cairn-data', version: 1 })
+      expect(exp.body.saved_places.saved.map((p: any) => p.name)).toContain('Backup test place')
+      expect(exp.body.trip_marks.annotations.map((a: any) => a.boot_id)).toContain(boot)
+      // what is not user data is not in it
+      expect(exp.text).not.toMatch(/passkey|session|public_key|service-token|bootstrap/i)
+
+      // the scratch instance starts without any of it
+      const before = (await GET(EMPTY, '/api/data/export')).body
+      expect(before.saved_places.saved.map((p: any) => p.name)).not.toContain('Backup test place')
+      expect(before.trip_marks.annotations).toEqual([])
+
+      const restored = await call(EMPTY, 'POST', '/api/data/import', { json: exp.body })
+      expect(restored.status, restored.text).toBe(200)
+      expect(restored.body.saved_places.added).toBe(exp.body.saved_places.saved.length)
+      expect(restored.body.trip_marks.changed).toBe(exp.body.trip_marks.annotations.length)
+
+      // and now it has the same places and marks
+      const after = (await GET(EMPTY, '/api/data/export')).body
+      const strip = (s: any[]) => s.map(({ name, lat, lon, category, radius_m }) => ({ name, lat, lon, category, radius_m })).sort((a, b) => a.name.localeCompare(b.name))
+      expect(strip(after.saved_places.saved)).toEqual(strip(exp.body.saved_places.saved))
+      expect(after.trip_marks.annotations).toEqual(exp.body.trip_marks.annotations)
+      expect((await GET(EMPTY, '/api/annotations/:bootId', { params: { bootId: boot } })).body.annotation.note).toBe('restore me')
+
+      // restoring again changes nothing
+      const again = await call(EMPTY, 'POST', '/api/data/import', { json: exp.body })
+      expect(again.body).toMatchObject({ ok: true, saved_places: { added: 0 }, trip_marks: { changed: 0 } })
+    } finally {
+      await call(DATA, 'DELETE', '/api/places/saved/:id', { params: { id: String(place.body.saved.id) } })
+      await call(DATA, 'DELETE', '/api/annotations/:bootId', { params: { bootId: boot } })
+      // leave the scratch instance as it was
+      const left = (await GET(EMPTY, '/api/places/saved/export')).body.saved
+      for (const p of left) {
+        const id = (await GET(EMPTY, '/api/places')).body.saved.find((x: any) => x.name === p.name)?.id
+        if (id) await call(EMPTY, 'DELETE', '/api/places/saved/:id', { params: { id: String(id) } })
+      }
+      await call(EMPTY, 'DELETE', '/api/annotations/:bootId', { params: { bootId: boot } })
+    }
+  })
+
+  it('refuses a bad file without changing anything, even when one part is fine', async () => {
+    const good = (await GET(DATA, '/api/data/export')).body
+    const places0 = (await GET(DATA, '/api/places/saved/export')).body.saved.length
+    const bad = [
+      {}, { kind: 'cairn-data' }, { kind: 'cairn-data', version: 2 },
+      { ...good, saved_places: { version: 1 } },
+      { ...good, trip_marks: { version: 1, annotations: 'x' } },
+      { ...good, saved_places: { version: 1, saved: [{ name: 'Half a restore', lat: 1, lon: 1 }, { name: '', lat: 1, lon: 1 }] } },
+      { ...good, saved_places: good.saved_places, trip_marks: { version: 1, annotations: [{ boot_id: 'bad' }] } },
+    ]
+    for (const body of bad) expect((await call(DATA, 'POST', '/api/data/import', { json: body })).status, JSON.stringify(body).slice(0, 80)).toBe(400)
+    expect((await call(DATA, 'POST', '/api/data/import', { raw: '{}', type: 'text/plain' })).status).toBe(415)
+    expect((await GET(DATA, '/api/places/saved/export')).body.saved.length).toBe(places0)
+    expect((await GET(DATA, '/api/places/saved/export')).body.saved.map((p: any) => p.name)).not.toContain('Half a restore')
+    for (const [m, p] of [['GET', '/api/data/export'], ['POST', '/api/data/import']] as const) expect((await call(DATA, m, p, { auth: 'none', ...(m === 'POST' ? { json: {} } : {}) })).status).toBe(401)
+    expect((await call(DATA, 'POST', '/api/data/import', { auth: 'service', json: good })).status).toBe(403)
+  })
+})
+
 // ─── empty store ─────────────────────────────────────────────────────────────
 
 describe('empty store: the same routes return empty, not errors', () => {
@@ -880,7 +1017,7 @@ describe('missing capability: the store is not there', () => {
   const fakeBoot = { bootId: UNKNOWN_BOOT }
 
   it('every store-backed route answers 502 "store unreachable": a JSON error, quickly', async () => {
-    const routes = inventory.filter(r => r.method === 'GET' && !r.path.startsWith('/api/places/saved') && !r.path.startsWith('/api/auth/') && !r.path.startsWith('/api/annotations'))
+    const routes = inventory.filter(r => r.method === 'GET' && !r.path.startsWith('/api/places/saved') && !r.path.startsWith('/api/auth/') && !r.path.startsWith('/api/annotations') && !r.path.startsWith('/api/data/'))
     for (const r of routes) {
       const started = Date.now()
       const res = await GET(DOWN, r.path, { params: fakeBoot, query: { boot_id: UNKNOWN_BOOT } })

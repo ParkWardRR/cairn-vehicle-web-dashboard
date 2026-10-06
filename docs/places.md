@@ -16,7 +16,7 @@ Everything below is in `/var/lib/cairn-ui/` on the server (`NUXT_PLACES_DATA_DIR
 
 If `saved-places.sqlite` is lost, the next start restores it from
 `saved-places.json`. For a copy that survives the server, run
-`deploy/backup-places.sh` from a laptop (it only reads), or use Export on the
+`deploy/backup-data.sh` from a laptop (it only reads), or use Export on the
 Places page. Import merges a file back in and skips places already there.
 
 These files hold real locations. They are not in the repository and must not be.
