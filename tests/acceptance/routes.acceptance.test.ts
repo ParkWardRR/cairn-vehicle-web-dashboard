@@ -401,14 +401,19 @@ describe('bad input', () => {
     expect((await call(DATA, 'DELETE', '/api/places/saved/:id', { params: { id: 'abc' } })).status).toBe(400)
   })
 
-  it('the query endpoint is read-only', async () => {
-    const ok = await call(DATA, 'POST', '/api/analytics/query', { json: { sql: 'select 1 as one' } })
-    expect(ok.status).toBe(200)
-    expect(ok.body.rows).toEqual([[1]])
-    for (const sql of ['drop table position', 'delete from obd', 'insert into gap select * from gap', 'attach \'/tmp/x\' as x']) {
-      const r = await call(DATA, 'POST', '/api/analytics/query', { json: { sql } })
+  it('there is no route that runs caller-supplied SQL (issue #1)', async () => {
+    // The raw passthrough was removed: no route answers an arbitrary SELECT, so no table can be read whole.
+    for (const sql of ['select 1 as one', 'select * from position', 'drop table position']) {
+      const r = await fetch(DATA + '/api/analytics/query', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ sql }),
+        signal: AbortSignal.timeout(30_000),
+      })
+      const text = await r.text()
       expect(r.status, sql).toBeGreaterThanOrEqual(400)
       expect(r.status, sql).toBeLessThan(500)
+      expect(text, sql).not.toContain('"rows"')
     }
     // and nothing was lost
     expect((await GET(DATA, '/api/device/tsdb-status')).body.position_rows).toBeGreaterThan(0)
