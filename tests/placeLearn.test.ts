@@ -71,7 +71,10 @@ describe('SavedPlaces durability', () => {
   it('reports a failed backup without losing the edit', () => {
     const errors: unknown[] = []
     const dir = tmp()
-    const s = new SavedPlaces(join(dir, 's.sqlite'), { backupDir: '/proc/definitely/not/writable', onBackupError: e => errors.push(e) })
+    // A directory beneath a regular file can never be created (ENOTDIR), on any OS. A path
+    // under /proc looks unwritable too, but as root on Linux Node's recursive mkdir never returns.
+    writeFileSync(join(dir, 'not-a-dir'), '')
+    const s = new SavedPlaces(join(dir, 's.sqlite'), { backupDir: join(dir, 'not-a-dir', 'backups'), onBackupError: e => errors.push(e) })
     s.create({ name: 'Home', lat: 34, lon: -118.4 })
     expect(s.list()).toHaveLength(1)
     expect(errors.length).toBeGreaterThan(0)
