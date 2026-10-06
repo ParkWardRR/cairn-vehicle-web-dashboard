@@ -2,6 +2,9 @@
 # Staged acceptance for the web layer: nothing here touches a real store or a real host.
 #
 #   tests/staging.sh             run the staged acceptance suite
+#   tests/staging.sh --run CMD   start the instances, run CMD with CAIRN_WEB_DATA / _EMPTY / _DOWN
+#                                and CAIRN_SERVICE_TOKEN in its environment, then stop them
+#                                (e.g. regenerate the screenshots: see scripts/screenshots.mjs)
 #   tests/staging.sh --capture   also rewrite deploy/required-queries.json from the SQL
 #                                the web layer sent the demo store during the suite
 #
@@ -19,7 +22,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
-CAPTURE=0; [ "${1:-}" = "--capture" ] && CAPTURE=1
+CAPTURE=0; RUN_CMD=""
+[ "${1:-}" = "--capture" ] && CAPTURE=1
+if [ "${1:-}" = "--run" ]; then RUN_CMD="${2:?--run needs a command}"; fi
 BASE="${CAIRN_STAGING_PORT_BASE:-18480}"
 STORE_DATA=$BASE; STORE_EMPTY=$((BASE + 1)); STORE_NONE=$((BASE + 9))
 WEB_DATA=$((BASE - 5380)); WEB_EMPTY=$((BASE - 5379)); WEB_DOWN=$((BASE - 5378))   # 13100..13102 by default
@@ -99,6 +104,14 @@ wait_authed() { for _ in $(seq 1 120); do authed "$1" && return 0; sleep 0.5; do
 wait_authed "http://127.0.0.1:$WEB_DATA/api/vehicles"
 wait_authed "http://127.0.0.1:$WEB_EMPTY/api/vehicles"
 curl -sS -o /dev/null -H "Authorization: Bearer $SERVICE_TOKEN" "http://127.0.0.1:$WEB_DOWN/api/device/tsdb-status" || { echo "the web instance over the missing store did not start" >&2; exit 1; }
+
+if [ -n "$RUN_CMD" ]; then
+  echo "==> running: $RUN_CMD"
+  set +e
+  CAIRN_WEB_DATA="http://127.0.0.1:$WEB_DATA" CAIRN_WEB_EMPTY="http://127.0.0.1:$WEB_EMPTY" CAIRN_WEB_DOWN="http://127.0.0.1:$WEB_DOWN" \
+  CAIRN_SERVICE_TOKEN="$SERVICE_TOKEN" CAIRN_BOOTSTRAP_CODE="$BOOTSTRAP_CODE" bash -c "$RUN_CMD"
+  exit $?
+fi
 
 echo "==> running the acceptance suite"
 set +e

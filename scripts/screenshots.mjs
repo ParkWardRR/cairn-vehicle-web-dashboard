@@ -1,8 +1,11 @@
 // Captures the README screenshots from a running UI.
 //
-//   go run ./server/cmd/cairn-tsdb-demo        # synthetic data on :8480
-//   npx nuxt dev --port 3123                   # in the web repository root (ui/ in the monorepo)
-//   node scripts/screenshots.mjs http://localhost:3123 docs/screenshots   # monorepo: ../docs/screenshots
+//   tests/staging.sh --run 'node scripts/screenshots.mjs $CAIRN_WEB_DATA docs/screenshots'
+//
+// That starts the production build over the synthetic demo store, with authentication on as in
+// production, and passes this script the read-only service token (CAIRN_SERVICE_TOKEN). Against
+// any other instance, set CAIRN_SERVICE_TOKEN to that instance's token (or run it with
+// NUXT_AUTH_MODE=off in development). The token is sent to the app's own origin only.
 import { chromium } from '@playwright/test'
 import { mkdirSync, readFileSync, existsSync } from 'node:fs'
 
@@ -45,15 +48,22 @@ await ctx.addInitScript(({ hide }) => {
     document.head.appendChild(s)
   })
 }, { hide: hideDevtools })
+const token = process.env.CAIRN_SERVICE_TOKEN
+if (token) {
+  // Only the app's own requests carry the token, never the tile servers'.
+  await ctx.route(`${new URL(base).origin}/**`, route => route.continue({ headers: { ...route.request().headers(), authorization: `Bearer ${token}` } }))
+}
 const page = await ctx.newPage()
 
-const { trips } = await (await page.request.get(`${base}/api/trips?limit=200`)).json()
+const authz = token ? { authorization: `Bearer ${token}` } : {}
+const { trips } = await (await page.request.get(`${base}/api/trips?limit=200`, { headers: authz })).json()
 const long = trips.filter(t => t.duration_s > 600).sort((a, b) => b.start_time.localeCompare(a.start_time))
 const featured = long[0]
 
 const shots = [
   { name: 'dashboard', path: '/', full: true, map: true },
   { name: 'trips', path: '/trips' },
+  { name: 'stats', path: '/stats', full: true },
   { name: 'trip-detail', path: `/trips/${featured.boot_id}`, full: true, map: true },
   { name: 'places', path: '/places', map: true },
   { name: 'boost', path: '/boost', full: true, height: 1250 },
