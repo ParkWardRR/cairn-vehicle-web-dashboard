@@ -15,7 +15,9 @@ No account in any cloud service is involved.
 `/login` signs in with a passkey. Before there is one:
 
 - from a device on your tailnet whose login is in `NUXT_AUTH_TAILNET_USERS`, `/login` offers to create the first passkey; or
-- with the one-time code in `bootstrap-code` in the data directory (`/var/lib/cairn-ui/`, readable by root only). The file is deleted when the first passkey exists.
+- with the one-time code in `bootstrap-code` in the data directory (`/var/lib/cairn-ui/`, readable by root only). The file is deleted when the first passkey exists. The sign-in page shows the command to read it (with a copy button) and, when the device is on a tailnet but not allowed, says why it was not recognised.
+
+The code is deliberate: without it, whoever reached a fresh install first would own it. Tailnet recognition needs the request to arrive from a tailnet address; if the site's name resolves to a LAN address, a phone on home Wi-Fi arrives as a LAN client and needs the code.
 
 Adding or removing a passkey (the Security page) needs a passkey used in the last five minutes, so a Tailnet address or a stolen session cannot enrol a second way in. Removing a passkey ends every session it started.
 

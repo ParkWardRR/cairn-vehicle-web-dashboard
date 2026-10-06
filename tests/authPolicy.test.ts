@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import { bearerToken, clientIp, csrfRefusal, isApiPath, isPublicPath, parseList, tailnetLogin, trustsProxy } from '../server/utils/authPolicy'
+import { bearerToken, clientIp, csrfRefusal, isApiPath, isPublicPath, isTailnetAddress, parseList, tailnetLogin, trustsProxy } from '../server/utils/authPolicy'
 
 const h = (o: Record<string, string>) => ({ get: (n: string) => o[n.toLowerCase()] ?? null })
 
@@ -66,6 +66,15 @@ describe('tailnetLogin', () => {
   })
   it('never matches an unknown or malformed answer', () => {
     for (const w of [null, undefined, 'x', {}, { UserProfile: {} }, { UserProfile: { LoginName: 5 } }]) expect(tailnetLogin(w as any)).toBeNull()
+  })
+})
+
+describe('isTailnetAddress', () => {
+  it('knows the ranges Tailscale uses', () => {
+    for (const ip of ['100.64.0.1', '100.100.100.100', '100.127.255.254', '::ffff:100.70.92.86', 'fd7a:115c:a1e0::1d37:5c56', 'FD7A:115C:A1E0:ab12::1']) expect(isTailnetAddress(ip), ip).toBe(true)
+  })
+  it('and nothing else', () => {
+    for (const ip of ['100.63.255.255', '100.128.0.1', '172.16.6.80', '192.168.1.5', '127.0.0.1', '::1', 'fd00::1', 'x', '', null, undefined]) expect(isTailnetAddress(ip as any), String(ip)).toBe(false)
   })
 })
 

@@ -54,6 +54,14 @@ export function clientIp(peer: string | undefined, forwardedFor: string | null |
   return peer ? peer.replace(/^::ffff:/, '') : null
 }
 
+// Whether an address is in the ranges Tailscale hands out (100.64.0.0/10 and fd7a:115c:a1e0::/48).
+export function isTailnetAddress(ip: string | null | undefined): boolean {
+  if (!ip) return false
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/.exec(ip.replace(/^::ffff:/, ''))
+  if (v4) return Number(v4[1]) === 100 && Number(v4[2]) >= 64 && Number(v4[2]) <= 127
+  return ip.toLowerCase().startsWith('fd7a:115c:a1e0:')
+}
+
 export function trustsProxy(peer: string | undefined): boolean {
   return isLoopback(peer)
 }

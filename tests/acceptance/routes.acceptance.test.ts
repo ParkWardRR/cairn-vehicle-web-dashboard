@@ -195,7 +195,7 @@ describe('access control: no identity, no answer', () => {
   it('tells an anonymous caller how to sign in, and nothing else', async () => {
     const r = await GET(DATA, '/api/auth/session', { auth: 'none' })
     expect(r.status).toBe(200)
-    expect(r.body).toEqual({ authenticated: false, method: null, actor: null, fresh: false, passkeys: 0, can_enrol: true, auth: 'required' })
+    expect(r.body).toEqual({ authenticated: false, method: null, actor: null, fresh: false, passkeys: 0, can_enrol: true, on_tailnet: false, auth: 'required' })
     expect(r.text).not.toContain(OWNER_LOGIN)
   })
 
@@ -208,6 +208,14 @@ describe('access control: no identity, no answer', () => {
     const wrong = await send(DATA, 'POST', '/api/auth/register-options', { json: { bootstrapCode: 'not-the-code' } })
     expect(wrong.status).toBe(401)
     expect((await GET(DATA, '/api/auth/session', { auth: 'none' })).body.passkeys).toBe(0)
+  })
+
+  it('says whether the caller arrives over a tailnet, so the sign-in screen can explain itself', async () => {
+    const via = async (ip: string) => (await GET(DATA, '/api/auth/session', { auth: 'none', headers: asTailnet(ip) })).body
+    expect(await via(TAILNET.owner)).toMatchObject({ on_tailnet: true, authenticated: true, method: 'tailnet' })
+    // on a tailnet, but not a login this server lets in
+    expect(await via(TAILNET.stranger)).toMatchObject({ on_tailnet: true, authenticated: false })
+    expect(await via('192.168.1.40')).toMatchObject({ on_tailnet: false, authenticated: false })
   })
 
   it('cannot sign in with a passkey that was never enrolled', async () => {

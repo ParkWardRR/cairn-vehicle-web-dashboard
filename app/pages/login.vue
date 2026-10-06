@@ -26,6 +26,11 @@ async function run(fn: () => Promise<unknown>) {
     busy.value = false
   }
 }
+const command = 'sudo cat /var/lib/cairn-ui/bootstrap-code'
+const copied = ref(false)
+async function copy() {
+  try { await navigator.clipboard.writeText(command); copied.value = true; setTimeout(() => { copied.value = false }, 2000) } catch { /* the command is on screen to select */ }
+}
 const doSignIn = () => run(signIn)
 const doEnrol = () => run(() => addPasskey('First passkey', code.value.trim() || undefined))
 </script>
@@ -56,11 +61,33 @@ const doEnrol = () => run(() => addPasskey('First passkey', code.value.trim() ||
       </template>
 
       <template v-else>
-        <p class="text-[13px] mb-3">No passkey is set up yet. Enter the one-time code from the server (the file <code>bootstrap-code</code> in the Cairn data directory), or open this page from an allowed Tailnet device.</p>
-        <input v-model="code" type="password" autocomplete="off" placeholder="One-time code" class="w-full rounded-lg px-3 py-2 text-sm mb-3 border" style="background: var(--color-bg); border-color: var(--color-border)">
-        <button class="w-full rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50" :disabled="busy || !supported" style="background: var(--color-accent); color: white" @click="doEnrol">
+        <p class="text-[13px] mb-3">No passkey is set up yet, so the first one has to be created by someone who can prove they run this server.</p>
+
+        <ol class="text-[13px] space-y-3 mb-4 list-decimal pl-5">
+          <li>
+            On the computer that runs Cairn, run this and copy what it prints:
+            <span class="mt-1.5 flex items-center gap-2 rounded-lg px-3 py-2 font-mono text-[12px]" :style="{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }">
+              <code class="flex-1 select-all whitespace-nowrap overflow-x-auto">{{ command }}</code>
+              <button type="button" class="shrink-0 font-sans text-[12px] font-medium" style="color: var(--color-accent)" @click="copy">{{ copied ? 'Copied' : 'Copy' }}</button>
+            </span>
+            <span class="block mt-1 text-[12px]" style="color: var(--color-text-secondary)">The code is a file called <code>bootstrap-code</code> in Cairn's data folder. Anyone who can read it already controls the server.</span>
+          </li>
+          <li>
+            Paste it here, then create the passkey. Your password manager (1Password, iCloud Keychain, a security key) will offer to save it.
+            <input v-model="code" type="password" autocomplete="off" placeholder="One-time code" aria-label="One-time code" class="w-full rounded-lg px-3 py-2 text-sm mt-1.5 border" style="background: var(--color-bg); border-color: var(--color-border)">
+          </li>
+        </ol>
+
+        <button class="w-full rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50" :disabled="busy || !supported || !code.trim()" style="background: var(--color-accent); color: white" @click="doEnrol">
           Create a passkey
         </button>
+
+        <p v-if="session?.on_tailnet" class="text-[12px] mt-4" style="color: var(--color-text-secondary)">
+          This device is on a tailnet, but its Tailscale login is not on this server's allow list, so it was not recognised. Add the login to <code>NUXT_AUTH_TAILNET_USERS</code> to skip the code from this device, or use the code.
+        </p>
+        <p v-else class="text-[12px] mt-4" style="color: var(--color-text-secondary)">
+          No code is needed from an allowed device that reaches this page over your tailnet. If you are at home, the address you used probably arrived over the local network instead, which is why you are seeing this.
+        </p>
       </template>
 
       <p v-if="!supported" class="text-[13px] mt-3" style="color: var(--color-danger, #f87171)">This browser cannot use passkeys here. Passkeys need a secure (https) address.</p>

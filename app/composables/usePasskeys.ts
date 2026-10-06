@@ -8,6 +8,7 @@ export interface AuthSession {
   fresh: boolean
   passkeys: number
   can_enrol: boolean
+  on_tailnet: boolean
 }
 
 // Only a path on this site: never an address that would send the person elsewhere after sign-in.
