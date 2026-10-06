@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from 'vitest'
 import { SavedPlaceError, SavedPlaces, cleanSaved } from '../server/utils/placeSaved'
 import { PlaceStore } from '../server/utils/placeStore'
