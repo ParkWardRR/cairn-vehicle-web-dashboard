@@ -9,6 +9,12 @@
   {"method": "GET", "path": "/api/analytics/speed-agreement"},
   {"method": "GET", "path": "/api/analytics/telemetry"},
   {"method": "GET", "path": "/api/analytics/trim-map"},
+  {"method": "DELETE", "path": "/api/annotations/:bootId"},
+  {"method": "GET", "path": "/api/annotations/:bootId"},
+  {"method": "PUT", "path": "/api/annotations/:bootId"},
+  {"method": "GET", "path": "/api/annotations/export"},
+  {"method": "POST", "path": "/api/annotations/import"},
+  {"method": "GET", "path": "/api/annotations"},
   {"method": "GET", "path": "/api/auth/audit"},
   {"method": "POST", "path": "/api/auth/login-options"},
   {"method": "POST", "path": "/api/auth/login-verify"},
@@ -34,6 +40,7 @@
   {"method": "GET", "path": "/api/places/saved/export"},
   {"method": "POST", "path": "/api/places/saved/import"},
   {"method": "GET", "path": "/api/snapshot"},
+  {"method": "GET", "path": "/api/stats/period"},
   {"method": "GET", "path": "/api/trips/:bootId"},
   {"method": "GET", "path": "/api/trips/:bootId/events"},
   {"method": "GET", "path": "/api/trips/:bootId/fuel"},
@@ -43,5 +50,6 @@
   {"method": "GET", "path": "/api/trips/:bootId/telemetry"},
   {"method": "GET", "path": "/api/trips/:bootId/timeline"},
   {"method": "GET", "path": "/api/trips"},
+  {"method": "GET", "path": "/api/trips/search"},
   {"method": "GET", "path": "/api/vehicles"}
 ]

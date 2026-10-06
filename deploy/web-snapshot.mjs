@@ -61,12 +61,13 @@ function snapshot(stateDir, buildDir, destRoot) {
       const db = new DatabaseSync(src, { readOnly: true })
       try { db.exec(`VACUUM INTO '${out.replace(/'/g, "''")}'`) } finally { db.close() }
       manifest.state[name] = { kind: 'sqlite', sha256: sha(out), ...rowCounts(out) }
-    } else if (name === 'saved-places.json') {
+    } else if (/\.json$/.test(name)) {
       const out = join(dest, 'state', name)
       cpSync(src, out)
       manifest.state[name] = { kind: 'file', sha256: sha(out) }
     }
-    // -wal and -shm are folded into the VACUUM copy; backups/ is the app's own dated copies.
+    // Every .json here is a mirror of a store (saved places, trip marks). -wal and -shm are folded
+    // into the VACUUM copy; backups/ is the app's own dated copies.
   }
 
   if (existsSync(buildDir)) {

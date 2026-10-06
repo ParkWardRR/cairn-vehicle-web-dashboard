@@ -615,6 +615,147 @@ describe('representative data (synthetic demo store)', () => {
   })
 })
 
+// ─── history: periods, marks and search ──────────────────────────────────────
+
+describe('history: statistics for any period, and marks on trips', () => {
+  let trips: any[] = []
+  let first: string, last: string
+  const day = (t: any) => String(t.start_time).slice(0, 10)
+
+  beforeAll(async () => {
+    trips = (await GET(DATA, '/api/trips', { query: { limit: '200', sort: 'observed_at' } })).body.trips
+    const days = trips.map(day).sort()
+    first = days[0]; last = days[days.length - 1]
+  })
+
+  it('a custom range that spans every trip agrees with the trip list and the dashboard', async () => {
+    const r = await GET(DATA, '/api/stats/period', { query: { period: 'custom', from: first, to: last } })
+    expect(r.status, r.text).toBe(200)
+    expect(r.body.totals.trips).toBe(trips.length)
+    expect(r.body.totals.duration_s).toBeCloseTo(trips.reduce((n, t) => n + Number(t.duration_s), 0), 3)
+    const dash = (await GET(DATA, '/api/dashboard/stats')).body.allTime
+    expect(r.body.totals.distance_m).toBeCloseTo(Number(dash.total_distance_m), 0)
+    expect(r.body.totals.max_speed_kph).toBe(Number(dash.max_speed_kph))
+    // the chart is the same numbers, and has a bucket for every day, driven or not
+    expect(r.body.series.reduce((n: number, b: any) => n + b.trips, 0)).toBe(trips.length)
+    expect(r.body.series[0].bucket).toBe(first)
+    expect(r.body.from).toBe(first)
+    for (const b of r.body.series) expect(b.bucket).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+  })
+
+  it('a period with no trips is zeros, not an error, and the period before is given for comparison', async () => {
+    const r = await GET(DATA, '/api/stats/period', { query: { period: 'week', date: '2001-03-14' } })
+    expect(r.status).toBe(200)
+    expect(r.body).toMatchObject({ period: 'week', from: '2001-03-12', to: '2001-03-19', bucket: 'day', totals: { trips: 0, duration_s: 0, distance_m: 0, max_speed_kph: 0 } })
+    expect(r.body.series).toHaveLength(7)
+    expect(r.body.previous).toMatchObject({ from: '2001-03-05', to: '2001-03-12', totals: { trips: 0 } })
+  })
+
+  it('the calendar periods tile: the year holds its months', async () => {
+    const y = Number(first.slice(0, 4))
+    const year = (await GET(DATA, '/api/stats/period', { query: { period: 'year', date: `${y}-06-15` } })).body
+    expect(year.bucket).toBe('month')
+    expect(year.series).toHaveLength(12)
+    let months = 0
+    for (let m = 1; m <= 12; m++) {
+      const mm = (await GET(DATA, '/api/stats/period', { query: { period: 'month', date: `${y}-${String(m).padStart(2, '0')}-10` } })).body
+      months += mm.totals.trips
+    }
+    expect(months).toBe(year.totals.trips)
+  })
+
+  it('refuses a bad period, date or range', async () => {
+    for (const query of [{ period: 'decade' }, { period: 'month', date: 'yesterday' }, { period: 'custom' }, { period: 'custom', from: '2026-03-10', to: '2026-03-01' }, { period: 'custom', from: '1900-01-01', to: '2026-01-01' }, { period: 'custom', from: "2026-01-01'; drop table position;--", to: '2026-02-01' }]) {
+      expect((await GET(DATA, '/api/stats/period', { query })).status, JSON.stringify(query)).toBe(400)
+    }
+  })
+
+  it('an empty store has empty periods', async () => {
+    const r = await GET(EMPTY, '/api/stats/period', { query: { period: 'month' } })
+    expect(r.status).toBe(200)
+    expect(r.body.totals.trips).toBe(0)
+  })
+
+  const BOOT = () => trips[0].boot_id
+  const OTHER = () => trips[1].boot_id
+
+  it('marks a trip: bookmark, tags and a note, read back and listed', async () => {
+    const put = await call(DATA, 'PUT', '/api/annotations/:bootId', { params: { bootId: BOOT() }, json: { bookmarked: true, tags: ['Scenic', 'coast road'], note: 'Best drive of the autumn' } })
+    expect(put.status, put.text).toBe(200)
+    expect(put.body.annotation).toMatchObject({ boot_id: BOOT(), bookmarked: true, tags: ['coast road', 'scenic'], note: 'Best drive of the autumn' })
+    expect((await GET(DATA, '/api/annotations/:bootId', { params: { bootId: BOOT() } })).body.annotation.note).toBe('Best drive of the autumn')
+    const list = await GET(DATA, '/api/annotations')
+    expect(list.body.annotations.map((a: any) => a.boot_id)).toContain(BOOT())
+    expect(list.body.tags).toEqual(expect.arrayContaining([{ tag: 'scenic', trips: 1 }]))
+    expect((await GET(DATA, '/api/annotations', { query: { tag: 'scenic' } })).body.annotations).toHaveLength(1)
+    expect((await GET(DATA, '/api/annotations', { query: { bookmarked: '1' } })).body.annotations.length).toBeGreaterThan(0)
+    // an unmarked trip reads back as empty, not as an error
+    expect((await GET(DATA, '/api/annotations/:bootId', { params: { bootId: '1'.repeat(32) } })).body.annotation).toMatchObject({ bookmarked: false, tags: [], note: null })
+  })
+
+  it('refuses bad marks', async () => {
+    const put = (bootId: string, json: unknown) => call(DATA, 'PUT', '/api/annotations/:bootId', { params: { bootId }, json })
+    expect((await put('nope', {})).status).toBe(400)
+    expect((await put(BOOT(), { tags: ["a'b"] })).status).toBe(400)
+    expect((await put(BOOT(), { note: 'x'.repeat(2001) })).status).toBe(400)
+    expect((await put(BOOT(), { bookmarked: 'yes' })).status).toBe(400)
+    expect((await call(DATA, 'PUT', '/api/annotations/:bootId', { params: { bootId: BOOT() }, raw: '{}', type: 'text/plain' })).status).toBe(415)
+    expect((await GET(DATA, '/api/annotations/:bootId', { params: { bootId: 'nope' } })).status).toBe(400)
+    expect((await call(DATA, 'DELETE', '/api/annotations/:bootId', { params: { bootId: '2'.repeat(32) } })).status).toBe(404)
+  })
+
+  it('searches by tag, bookmark, note text and date, and shows the marks on the result', async () => {
+    await call(DATA, 'PUT', '/api/annotations/:bootId', { params: { bootId: OTHER() }, json: { tags: ['commute'] } })
+    const search = (query: Record<string, string>) => GET(DATA, '/api/trips/search', { query })
+    const ids = (r: Res) => r.body.trips.map((t: any) => t.boot_id)
+
+    expect(ids(await search({ tag: 'scenic' }))).toEqual([BOOT()])
+    expect(ids(await search({ tag: 'commute' }))).toEqual([OTHER()])
+    expect(ids(await search({ bookmarked: '1' }))).toEqual([BOOT()])
+    expect(ids(await search({ q: 'autumn' }))).toEqual([BOOT()])
+    expect(ids(await search({ q: 'COAST' }))).toEqual([BOOT()])
+    expect(ids(await search({ q: 'no such thing anywhere' }))).toEqual([])
+    expect(ids(await search({ tag: 'scenic', q: 'commute' }))).toEqual([])
+    const hit = (await search({ tag: 'scenic' })).body.trips[0]
+    expect(hit.annotation).toMatchObject({ bookmarked: true, tags: ['coast road', 'scenic'] })
+    expect(hit).toHaveProperty('duration_s')
+    expect(hit).toHaveProperty('start_time')
+
+    // dates narrow the same way the stats do
+    const all = await search({ from: first, to: last, limit: '200' })
+    expect(all.body.total).toBe(trips.length)
+    expect((await search({ from: '2001-01-01', to: '2001-12-31' })).body.total).toBe(0)
+    expect((await search({ limit: '2' })).body.trips).toHaveLength(2)
+    expect((await search({ from: 'x' })).status).toBe(400)
+    expect((await search({ q: "x'; drop table position;--" })).status).toBe(200)
+  })
+
+  it('exports every mark, and an import changes nothing the second time', async () => {
+    const exp = await GET(DATA, '/api/annotations/export')
+    expect(exp.status).toBe(200)
+    expect(exp.headers.get('content-disposition')).toMatch(/attachment; filename="cairn-trip-marks-\d{4}-\d{2}-\d{2}\.json"/)
+    expect(exp.body.annotations.map((a: any) => a.boot_id)).toEqual(expect.arrayContaining([BOOT(), OTHER()]))
+    const again = await call(DATA, 'POST', '/api/annotations/import', { json: exp.body })
+    expect(again.body).toEqual({ ok: true, changed: 0 })
+    expect((await call(DATA, 'POST', '/api/annotations/import', { json: { nope: 1 } })).status).toBe(400)
+    expect((await call(DATA, 'POST', '/api/annotations/import', { raw: '[]', type: 'text/plain' })).status).toBe(415)
+  })
+
+  it('removes marks, and the search forgets them', async () => {
+    expect((await call(DATA, 'DELETE', '/api/annotations/:bootId', { params: { bootId: BOOT() } })).body).toEqual({ ok: true })
+    expect((await call(DATA, 'DELETE', '/api/annotations/:bootId', { params: { bootId: OTHER() } })).body).toEqual({ ok: true })
+    expect((await GET(DATA, '/api/trips/search', { query: { bookmarked: '1' } })).body.trips).toEqual([])
+    expect((await GET(DATA, '/api/annotations')).body.annotations).toEqual([])
+  })
+
+  it('the marks are as protected as everything else', async () => {
+    for (const [m, p] of [['GET', '/api/annotations'], ['GET', '/api/stats/period'], ['GET', '/api/trips/search'], ['GET', '/api/annotations/export'], ['POST', '/api/annotations/import'], ['PUT', '/api/annotations/:bootId'], ['DELETE', '/api/annotations/:bootId']] as const) {
+      expect((await call(DATA, m, p, { params: { bootId: BOOT() }, auth: 'none', ...(m === 'GET' ? {} : { json: {} }) })).status, `${m} ${p}`).toBe(401)
+    }
+    expect((await call(DATA, 'PUT', '/api/annotations/:bootId', { params: { bootId: BOOT() }, auth: 'service', json: { bookmarked: true } })).status).toBe(403)
+  })
+})
+
 // ─── empty store ─────────────────────────────────────────────────────────────
 
 describe('empty store: the same routes return empty, not errors', () => {
@@ -739,7 +880,7 @@ describe('missing capability: the store is not there', () => {
   const fakeBoot = { bootId: UNKNOWN_BOOT }
 
   it('every store-backed route answers 502 "store unreachable": a JSON error, quickly', async () => {
-    const routes = inventory.filter(r => r.method === 'GET' && !r.path.startsWith('/api/places/saved') && !r.path.startsWith('/api/auth/'))
+    const routes = inventory.filter(r => r.method === 'GET' && !r.path.startsWith('/api/places/saved') && !r.path.startsWith('/api/auth/') && !r.path.startsWith('/api/annotations'))
     for (const r of routes) {
       const started = Date.now()
       const res = await GET(DOWN, r.path, { params: fakeBoot, query: { boot_id: UNKNOWN_BOOT } })

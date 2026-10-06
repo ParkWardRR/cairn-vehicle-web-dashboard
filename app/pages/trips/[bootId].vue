@@ -321,6 +321,8 @@ function insightIcon(icon: string | undefined): string {
         <DataStatCard label="OBD Samples" :value="`${trip.obd_samples?.toLocaleString()}`" />
       </div>
 
+      <TripsTripMarks :boot-id="bootId" />
+
       <!-- Fuel economy -->
       <div v-if="fuel" class="mb-6">
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
