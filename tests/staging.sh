@@ -113,7 +113,10 @@ set -e
 if [ "$rc" -eq 0 ] && [ "$CAPTURE" = 1 ]; then
   node -e '
     const lines = require("fs").readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean)
-    const sql = [...new Set(lines.map(l => JSON.parse(l)))].sort()
+    // The demo store mints some ids at build time, and EXPLAIN binds a statement without caring
+    // which id it names, so ids are normalised: the file then does not depend on the run.
+    const zeros = "\x27" + "0".repeat(32) + "\x27"
+    const sql = [...new Set(lines.map(l => JSON.parse(l).replace(/\x27[0-9a-f]{32}\x27/g, zeros)))].sort()
     require("fs").writeFileSync(process.argv[2], JSON.stringify(sql, null, 1) + "\n")
     console.log("==> captured " + sql.length + " distinct statements into deploy/required-queries.json")
   ' "$SQL_LOG" deploy/required-queries.json
