@@ -71,7 +71,10 @@ jobs:
         run: npm ci
 
       - name: Staged acceptance
-        run: tests/staging.sh
+        run: tests/staging.sh --capture
+
+      - name: The queries a deploy checks are the queries the build sends
+        run: git diff --exit-code deploy/required-queries.json
 
   # cairn-fsq is its own Go module (a command-line tool over the tsdb snapshot); it
   # imports only the standard library and DuckDB.

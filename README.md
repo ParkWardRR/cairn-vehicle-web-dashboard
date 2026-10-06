@@ -39,6 +39,11 @@ it drifts from `server/api`.
 `CAIRN_DEPLOY_HOST` or a gitignored `deploy.env`; the real Caddy site goes in a gitignored
 `deploy/caddy/Caddyfile` (copy `Caddyfile.example`). No host name is stored in this repository.
 
+Before uploading anything, `deploy-ui.sh` has the live store plan (`EXPLAIN`, not run) every query in
+`deploy/required-queries.json` and refuses the deploy if it cannot, naming the missing view or column. That file
+is the SQL the web layer sent the demo store during staging; regenerate it with `tests/staging.sh --capture`
+(CI fails if it is stale).
+
 `deploy/install-fsq.sh` (or `deploy/deploy-ui.sh --with-fsq`) builds the `cairn-fsq` place-extract tool on the host
 (DuckDB links through cgo, so the host needs go and gcc) and installs it as `/usr/local/bin/cairn-fsq`, keeping
 the previous binary as `.prev`.

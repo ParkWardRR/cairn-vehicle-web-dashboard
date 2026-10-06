@@ -1,3 +1,5 @@
+import { appendFileSync } from 'node:fs'
+
 const config = useRuntimeConfig()
 
 interface TsdbResult {
@@ -21,7 +23,16 @@ function noAnswer(e: any): boolean {
   return !e?.response && !e?.statusCode
 }
 
+// CAIRN_SQL_LOG=<file> records every statement sent to the store, one JSON string per
+// line. tests/staging.sh --capture uses it to write deploy/required-queries.json, the
+// queries a deploy checks against the live store before it ships anything.
+function recordSql(sql: string) {
+  const file = process.env.CAIRN_SQL_LOG
+  if (file) appendFileSync(file, JSON.stringify(sql) + '\n')
+}
+
 export async function queryTsdb(sql: string): Promise<TsdbResult> {
+  recordSql(sql)
   try {
     return await $fetch<TsdbResult>(`${config.tsdbUrl}/query`, {
       method: 'POST',

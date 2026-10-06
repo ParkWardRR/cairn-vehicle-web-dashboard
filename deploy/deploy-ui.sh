@@ -47,6 +47,20 @@ else
   fi
 fi
 
+echo "==> Checking the live store can serve this build..."
+# Every query the build sends (deploy/required-queries.json) is planned, not run, by the live
+# store. A build that needs a view or column the store lacks is refused here, before anything is
+# uploaded, and the store's own error says which.
+CAP_DIR="$(ssh "$HOST" 'mktemp -d')"
+STORE_URL="$(ssh "$HOST" "systemctl show cairn-ui -p Environment --value 2>/dev/null | tr ' ' '\n' | sed -n 's/^NUXT_TSDB_URL=//p'" | head -1)"
+scp -q "$BUILD_DIR/deploy/check-capabilities.mjs" "$BUILD_DIR/deploy/required-queries.json" "$HOST:$CAP_DIR/"
+if ! ssh "$HOST" "node $CAP_DIR/check-capabilities.mjs $CAP_DIR/required-queries.json ${STORE_URL:-http://127.0.0.1:8480}"; then
+  ssh "$HOST" "rm -rf $CAP_DIR" || true
+  echo "==> Refusing to deploy: the live store does not provide what this build needs. Nothing was uploaded." >&2
+  exit 1
+fi
+ssh "$HOST" "rm -rf $CAP_DIR" || true
+
 echo "==> Uploading build to $HOST:$UI_DIR..."
 ssh "$HOST" "sudo mkdir -p $UI_DIR && sudo chown cairn:cairn $UI_DIR"
 rsync -az --delete --rsync-path="sudo -u cairn rsync" "$BUILD_DIR/.output/" "$HOST:$UI_DIR/.output/"

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Staged acceptance for the web layer: nothing here touches a real store or a real host.
 #
-#   tests/staging.sh
+#   tests/staging.sh             run the staged acceptance suite
+#   tests/staging.sh --capture   also rewrite deploy/required-queries.json from the SQL
+#                                the web layer sent the demo store during the suite
 #
 # 1. builds the production web bundle (unless CAIRN_STAGING_NO_BUILD=1 and .output exists);
 # 2. builds the synthetic demo store (cairn-tsdb-demo) from the exact vehicle-server commit
@@ -17,6 +19,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
+CAPTURE=0; [ "${1:-}" = "--capture" ] && CAPTURE=1
 BASE="${CAIRN_STAGING_PORT_BASE:-18480}"
 STORE_DATA=$BASE; STORE_EMPTY=$((BASE + 1)); STORE_NONE=$((BASE + 9))
 WEB_DATA=$((BASE - 5380)); WEB_EMPTY=$((BASE - 5379)); WEB_DOWN=$((BASE - 5378))   # 13100..13102 by default
@@ -68,7 +71,9 @@ echo "==> starting the staged instances"
 "$STAGE/bin/cairn-tsdb-demo" -addr "127.0.0.1:$STORE_DATA" >"$RUN/store-data.log" 2>&1 & pids+=($!)
 "$STAGE/bin/cairn-tsdb-demo" -empty -addr "127.0.0.1:$STORE_EMPTY" >"$RUN/store-empty.log" 2>&1 & pids+=($!)
 
+SQL_LOG="$RUN/sql.log"
 web() { # port store-port places-dir
+  CAIRN_SQL_LOG="$([ "$CAPTURE" = 1 ] && [ "$1" = "$WEB_DATA" ] && echo "$SQL_LOG")" \
   NITRO_PORT="$1" NITRO_HOST=127.0.0.1 NUXT_TSDB_URL="http://127.0.0.1:$2" \
     NUXT_PLACES_EXTERNAL=false NUXT_PLACES_DATA_DIR="$3" \
     node .output/server/index.mjs >"$RUN/web-$1.log" 2>&1 &
@@ -93,6 +98,14 @@ CAIRN_WEB_PLACES="$RUN/places-data" \
   npm run test:acceptance
 rc=$?
 set -e
+if [ "$rc" -eq 0 ] && [ "$CAPTURE" = 1 ]; then
+  node -e '
+    const lines = require("fs").readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean)
+    const sql = [...new Set(lines.map(l => JSON.parse(l)))].sort()
+    require("fs").writeFileSync(process.argv[2], JSON.stringify(sql, null, 1) + "\n")
+    console.log("==> captured " + sql.length + " distinct statements into deploy/required-queries.json")
+  ' "$SQL_LOG" deploy/required-queries.json
+fi
 if [ "$rc" -ne 0 ]; then
   echo "==> the suite failed; the instances' logs:" >&2
   for f in "$RUN"/*.log; do echo "--- $f" >&2; tail -n 20 "$f" >&2; done
