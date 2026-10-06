@@ -1,4 +1,4 @@
-module github.com/ParkWardRR/Cairn/ui/tools/cairn-fsq
+module github.com/ParkWardRR/cairn-vehicle-web-dashboard/tools/cairn-fsq
 
 go 1.27
 
