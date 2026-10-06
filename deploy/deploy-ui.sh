@@ -9,27 +9,30 @@
 # the UI talks to a server whose schema may not have caught up with that work.
 set -euo pipefail
 
-HOST="alfa@cairn.alpina.casa"
 UI_DIR="/srv/cairn-ui"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# The target comes from the environment or a gitignored deploy.env. No real host name
+# is stored in this repository.
+[ -f "$ROOT/deploy.env" ] && . "$ROOT/deploy.env"
+HOST="${CAIRN_DEPLOY_HOST:?set CAIRN_DEPLOY_HOST (user@host), or put it in deploy.env}"
 
 if [ "${1:-}" = "--dirty" ]; then
   echo "==> Building Nuxt UI from the working tree (uncommitted changes included)..."
-  BUILD_DIR="$ROOT/ui"
+  BUILD_DIR="$ROOT"
   (cd "$BUILD_DIR" && npm run build)
 else
   echo "==> Building Nuxt UI from $(git -C "$ROOT" rev-parse --short HEAD)..."
   TMP="$(mktemp -d)"
   trap 'rm -rf "$TMP"' EXIT
-  git -C "$ROOT" archive HEAD ui | tar -x -C "$TMP"
-  BUILD_DIR="$TMP/ui"
+  git -C "$ROOT" archive HEAD | tar -x -C "$TMP"
+  BUILD_DIR="$TMP"
   # Reuse the installed dependencies. A copy (cloned where the filesystem can),
   # not a symlink, which the build does not resolve correctly.
-  cp -Rc "$ROOT/ui/node_modules" "$BUILD_DIR/node_modules" 2>/dev/null || cp -R "$ROOT/ui/node_modules" "$BUILD_DIR/node_modules"
+  cp -Rc "$ROOT/node_modules" "$BUILD_DIR/node_modules" 2>/dev/null || cp -R "$ROOT/node_modules" "$BUILD_DIR/node_modules"
   (cd "$BUILD_DIR" && npx nuxt prepare >/dev/null && npm run build)
-  if [ -n "$(git -C "$ROOT" status --porcelain -- ui)" ]; then
-    echo "    note: ui/ has uncommitted changes; they are NOT in this deploy"
+  if [ -n "$(git -C "$ROOT" status --porcelain)" ]; then
+    echo "    note: the working tree has uncommitted changes; they are NOT in this deploy"
   fi
 fi
 
@@ -49,9 +52,13 @@ ssh "$HOST" "sudo mkdir -p /etc/systemd/system/cairn-ui.service.d && sudo mv /tm
 echo "==> Restarting cairn-ui..."
 ssh "$HOST" "sudo systemctl enable --now cairn-ui && sudo systemctl restart cairn-ui"
 
-echo "==> Updating Caddy config..."
-scp "$SCRIPT_DIR/caddy/Caddyfile" "$HOST:/tmp/Caddyfile"
-ssh "$HOST" "sudo mv /tmp/Caddyfile /etc/caddy/Caddyfile && sudo systemctl reload caddy"
+if [ -f "$SCRIPT_DIR/caddy/Caddyfile" ]; then
+  echo "==> Updating Caddy config..."
+  scp "$SCRIPT_DIR/caddy/Caddyfile" "$HOST:/tmp/Caddyfile"
+  ssh "$HOST" "sudo mv /tmp/Caddyfile /etc/caddy/Caddyfile && sudo systemctl reload caddy"
+else
+  echo "==> No deploy/caddy/Caddyfile here (copy Caddyfile.example and set your site); leaving Caddy alone"
+fi
 
 echo "==> Checking the API..."
 sleep 4
@@ -63,4 +70,4 @@ for p in trips places dashboard/stats heatmap ${B:+trips/$B trips/$B/stops trips
 done
 [ "$fail" = 0 ] || { echo "==> The deploy is up but some endpoints are failing."; exit 1; }
 
-echo "==> Done. UI available at https://cairn.alpina.casa"
+echo "==> Done."

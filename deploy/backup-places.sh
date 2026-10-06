@@ -8,7 +8,8 @@
 # The files contain real locations (home included). Keep them out of the repo.
 set -euo pipefail
 
-HOST="${CAIRN_HOST:-alfa@cairn.alpina.casa}"
+[ -f "$(dirname "$0")/../deploy.env" ] && . "$(dirname "$0")/../deploy.env"
+HOST="${CAIRN_HOST:-${CAIRN_DEPLOY_HOST:?set CAIRN_HOST (user@host), or CAIRN_DEPLOY_HOST in deploy.env}}"
 STATE="/var/lib/cairn-ui"
 DEST="${1:-$HOME/cairn-backups/places}"
 
