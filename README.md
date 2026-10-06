@@ -38,6 +38,13 @@ it drifts from `server/api`.
 `CAIRN_DEPLOY_HOST` or a gitignored `deploy.env`; the real Caddy site goes in a gitignored
 `deploy/caddy/Caddyfile` (copy `Caddyfile.example`). No host name is stored in this repository.
 
+## What it is pinned to
+
+`contracts.lock` pins the protocol release (the store schema this layer queries is `store/v1`). `server.lock`
+records the vehicle server revision this layer was last checked against and the contract it requires of it:
+a compatible store schema, not "a server at least this new". There is no server release yet, so `tag` is empty
+and the commit is the pin.
+
 ## Related repositories
 
 - [cairn-driving-log-selfhosted](https://github.com/ParkWardRR/Cairn): the front door, system docs and the contracts

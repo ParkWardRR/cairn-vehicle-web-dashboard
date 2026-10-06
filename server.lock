@@ -1,0 +1,8 @@
+{
+  "server": {
+    "repo": "https://github.com/ParkWardRR/cairn-vehicle-server",
+    "tag": "",
+    "commit": "21dd19c032c6e06d58ef8bb79c8aa905ab584e33",
+    "requires": { "store": "v1" }
+  }
+}
