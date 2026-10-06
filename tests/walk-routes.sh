@@ -7,6 +7,8 @@
 #
 # --empty is for a store with no trips: 400, 404 and 503 (no boot to ask about, nothing to show, no snapshot)
 # then count as answered as designed. Against a populated store they are failures.
+# A 404 that is the server saying it has no such route at all ("Page not found: ")
+# is never as designed: a route that went missing must not hide behind an empty store.
 #
 # Exit 0 only if every route answered 2xx. Routes with a parameter other than :bootId
 # are skipped (they need a place id the caller owns); POST/PATCH/DELETE are not walked.
@@ -29,10 +31,13 @@ while read -r method path; do
     *:*) skipped=$((skipped+1)); continue ;;
   esac
   # boot_id is ignored by routes that do not read it
-  code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 60 "$BASE$path?boot_id=$boot" || echo 000)"
+  out="$(mktemp)"
+  code="$(curl -sS -o "$out" -w '%{http_code}' --max-time 60 "$BASE$path?boot_id=$boot" || echo 000)"
+  noroute=0; grep -q 'Page not found: ' "$out" 2>/dev/null && noroute=1
+  rm -f "$out"
   case "$code" in
     2??) ok=$((ok+1)) ;;
-    400|404|503) if [ "$EMPTY" = 1 ]; then ok=$((ok+1)); else bad=$((bad+1)); echo "FAIL $code $path"; fi ;;
+    400|404|503) if [ "$EMPTY" = 1 ] && [ "$noroute" = 0 ]; then ok=$((ok+1)); else bad=$((bad+1)); echo "FAIL $code $path"; fi ;;
     *) bad=$((bad+1)); echo "FAIL $code $path" ;;
   esac
 done < <(sed -n 's/.*"method": "\([A-Z]*\)", "path": "\([^"]*\)".*/\1 \2/p' "$DIR/routes.json")

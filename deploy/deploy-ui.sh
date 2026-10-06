@@ -60,14 +60,23 @@ else
   echo "==> No deploy/caddy/Caddyfile here (copy Caddyfile.example and set your site); leaving Caddy alone"
 fi
 
-echo "==> Checking the API..."
+echo "==> Walking every GET route on the host..."
 sleep 4
-B="$(ssh "$HOST" "curl -s localhost:3000/api/trips" | sed -n 's/.*"boot_id":"\([0-9a-f]*\)".*/\1/p' | head -1)"
-fail=0
-for p in trips places dashboard/stats heatmap ${B:+trips/$B trips/$B/stops trips/$B/fuel}; do
-  code="$(ssh "$HOST" "curl -s -o /dev/null -w '%{http_code}' localhost:3000/api/$p")"
-  [ "$code" = "200" ] || { echo "    FAILED /api/$p -> $code"; fail=1; }
-done
-[ "$fail" = 0 ] || { echo "==> The deploy is up but some endpoints are failing."; exit 1; }
+# tests/walk-routes.sh needs only bash and curl and reads tests/routes.json, so it is
+# copied to the host and run there against the service itself (localhost:3000). A store
+# with no trips answers 400/404/503 on the trip routes by design, so --empty is used
+# only then.
+WALK_DIR="$(ssh "$HOST" 'mktemp -d')"
+trap 'ssh "$HOST" "rm -rf $WALK_DIR" 2>/dev/null || true; [ -z "${TMP:-}" ] || rm -rf "$TMP"' EXIT
+scp -q "$BUILD_DIR/tests/walk-routes.sh" "$BUILD_DIR/tests/routes.json" "$HOST:$WALK_DIR/"
+EMPTY=""
+if ! ssh "$HOST" "curl -fsS localhost:3000/api/trips" | grep -q '"boot_id"'; then
+  EMPTY="--empty"
+  echo "    the store lists no trips; walking with --empty"
+fi
+if ! ssh "$HOST" "bash $WALK_DIR/walk-routes.sh $EMPTY http://localhost:3000"; then
+  echo "==> The deploy is up but the routes listed above failed (each FAIL line names its route)."
+  exit 1
+fi
 
 echo "==> Done."
