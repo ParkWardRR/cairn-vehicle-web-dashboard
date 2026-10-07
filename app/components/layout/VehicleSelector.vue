@@ -10,9 +10,15 @@ const value = computed({
   set: (id: string) => { selected.value = id },
 })
 
-function label(v: { name: string; engine_code: string | null; archived: boolean }) {
+function label(v: { name: string; engine_code: string | null; engine_profile_id: string | null; archived: boolean }) {
   const engine = v.engine_code && !v.name.includes(v.engine_code) ? ` (${v.engine_code})` : ''
-  return `${v.name}${engine}${v.archived ? ' - archived' : ''}`
+  // The firmware profile the dongle will use for this car (BLE ENGINE_DECLARATION,
+  // contracts/ble/v1 § 0004). Only shown when it adds information beyond the engine_code
+  // already in the label.
+  const profile = v.engine_profile_id && (!v.engine_code || !v.engine_profile_id.toLowerCase().endsWith(v.engine_code.toLowerCase()))
+    ? ` [${v.engine_profile_id}]`
+    : ''
+  return `${v.name}${engine}${profile}${v.archived ? ' - archived' : ''}`
 }
 </script>
 

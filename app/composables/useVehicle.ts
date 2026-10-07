@@ -8,6 +8,10 @@ export interface VehicleOption {
   id: string
   name: string
   engine_code: string | null
+  // The engine profile id the server resolved for this vehicle (e.g. "bmw-n20"); the
+  // dongle will treat this as the companion-declared engine. `null` means the dongle
+  // falls back to its own VIN pattern or the default profile.
+  engine_profile_id: string | null
   archived: boolean
   bundles: number
   boots: number
