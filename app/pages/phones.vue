@@ -10,7 +10,7 @@ interface Phone {
   id: string, name: string, role: string, reach: string, active: boolean, status: string, key_id: string
   enrolled_at: number | null, revoked_at: number | null, revoked_reason: string | null, last_seen_at: number | null, last_via: string | null
 }
-interface ActivityEvent { at: number, kind: 'phone' | 'trip' | 'history' | 'security', tone: 'ok' | 'info' | 'warn', text: string, detail?: string, via?: string }
+interface ActivityEvent { at: number, kind: 'phone' | 'trip' | 'history' | 'security', tone: 'ok' | 'info' | 'warn', text: string, detail?: string, via?: string, count?: number, firstAt?: number }
 interface Car { id: string, name: string, engine_code: string | null, archived: boolean, bundles: number, boots: number, last_observed_at: string | null }
 
 const { data: phones, refresh: refreshPhones } = await useFetch<{ configured: boolean, phones: Phone[], missing?: string[] }>('/api/phones', { immediate: Boolean(human.value) })
@@ -23,7 +23,7 @@ const shownEvents = computed(() => (activity.value?.events ?? []).filter((e) => 
   if (filter.value === 'trip') return e.kind === 'trip' || e.kind === 'history'
   return e.kind === filter.value
 }))
-const needsLook = computed(() => (activity.value?.events ?? []).filter(e => e.kind === 'security').length)
+const needsLook = computed(() => (activity.value?.events ?? []).filter(e => e.kind === 'security').reduce((n, e) => n + (e.count ?? 1), 0))
 
 const ago = (ms: number | null) => {
   if (!ms) return 'never'
@@ -229,7 +229,7 @@ async function copy() {
             <span class="shrink-0 w-24" style="color: var(--color-text-secondary)" :title="exact(e.at)">{{ ago(e.at) }}</span>
             <span>
               <span :style="{ color: e.tone === 'warn' ? '#fbbf24' : e.tone === 'ok' ? '#34d399' : 'inherit' }">●</span>
-              {{ e.text }}<span v-if="e.detail" style="color: var(--color-text-secondary)"> — {{ e.detail }}</span><span v-if="e.via" style="color: var(--color-text-secondary)"> · {{ e.via }}</span>
+              {{ e.text }}<span v-if="e.detail" style="color: var(--color-text-secondary)"> — {{ e.detail }}</span><span v-if="e.via" style="color: var(--color-text-secondary)"> · {{ e.via }}</span><span v-if="e.count && e.count > 1" style="color: var(--color-text-secondary)" :title="`from ${exact(e.firstAt ?? null)} to ${exact(e.at)}`"> · ×{{ e.count }}</span>
             </span>
           </li>
         </ul>

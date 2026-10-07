@@ -24,6 +24,9 @@ export interface ActivityEvent {
   text: string
   detail?: string
   via?: string
+  /** How many identical events this stands for (a phone retrying a refused request), newest time in `at`. */
+  count?: number
+  firstAt?: number
 }
 
 export interface PhoneNames { nameOf(id: string | undefined): string }
@@ -58,6 +61,7 @@ export function reasonText(reason?: string): string | undefined {
     bad_manifest_signature: 'the dongle’s signature on the trip did not verify',
     unknown_client: 'an unknown phone',
     revoked: 'the phone was revoked',
+    client_revoked: 'this phone was revoked',
     scope: 'outside what this phone may see',
     timestamp_skew: 'the phone’s clock is off',
   }
@@ -121,7 +125,27 @@ export function mergeActivity(server: ServerAudit[], dashboard: DashboardAudit[]
     const d = describeDashboardEntry(r)
     if (d) events.push(d)
   }
-  return events.sort((a, b) => b.at - a.at).slice(0, limit)
+  return groupRepeats(events.sort((a, b) => b.at - a.at)).slice(0, limit)
+}
+
+const SAME_BURST_MS = 30 * 60_000
+
+// A phone that cannot sign in retries all day. Runs of the same thing close together become one line
+// with a count, so a dozen refusals do not bury the one trip that was carried.
+export function groupRepeats(sortedNewestFirst: ActivityEvent[]): ActivityEvent[] {
+  const out: ActivityEvent[] = []
+  for (const e of sortedNewestFirst) {
+    const prev = out[out.length - 1]
+    const same = prev && prev.kind === e.kind && prev.tone === e.tone && prev.text === e.text
+      && prev.detail === e.detail && prev.via === e.via && (prev.firstAt ?? prev.at) - e.at <= SAME_BURST_MS
+    if (same) {
+      prev.count = (prev.count ?? 1) + 1
+      prev.firstAt = e.at
+    } else {
+      out.push({ ...e })
+    }
+  }
+  return out
 }
 
 export interface LocalClient {

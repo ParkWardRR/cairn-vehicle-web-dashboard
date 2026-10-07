@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
 import {
-  describeDashboardEntry, describeServerEntry, mergeActivity, phoneNames, presentPhones, reasonText,
+  groupRepeats, describeDashboardEntry, describeServerEntry, mergeActivity, phoneNames, presentPhones, reasonText,
   type LocalClient, type ServerAudit,
 } from '../server/utils/phoneActivity'
 
@@ -89,6 +89,28 @@ describe('mergeActivity', () => {
     const merged = mergeActivity(server, mine, names)
     expect(merged.map(e => e.kind)).toEqual(['history', 'phone', 'trip'])
     expect(mergeActivity(server, mine, names, 2)).toHaveLength(2)
+  })
+})
+
+describe('groupRepeats', () => {
+  const refused = (ts: string) => row({ ts, route: 'GET /v1/snapshot', actor_type: 'anonymous', status: 401, reason: 'client_revoked' })
+
+  it('folds a phone retrying a refused request into one line with a count', () => {
+    const merged = mergeActivity([refused('2026-10-07T16:00:00Z'), refused('2026-10-07T16:01:00Z'), refused('2026-10-07T16:02:00Z')], [], names)
+    expect(merged).toHaveLength(1)
+    expect(merged[0]).toMatchObject({ count: 3, at: Date.parse('2026-10-07T16:02:00Z'), firstAt: Date.parse('2026-10-07T16:00:00Z'), detail: 'this phone was revoked' })
+  })
+
+  it('does not fold different things, or the same thing hours apart', () => {
+    const trip = row({ ts: '2026-10-07T16:01:30Z', route: 'POST /v1/relay/bundles/{id}/commit', client_id: SAM, target_id: 'b'.repeat(32) })
+    const between = mergeActivity([refused('2026-10-07T16:00:00Z'), trip, refused('2026-10-07T16:03:00Z')], [], names)
+    expect(between.map(e => e.kind)).toEqual(['security', 'trip', 'security'])
+    const apart = mergeActivity([refused('2026-10-07T08:00:00Z'), refused('2026-10-07T16:00:00Z')], [], names)
+    expect(apart).toHaveLength(2)
+  })
+
+  it('leaves single events without a count', () => {
+    expect(groupRepeats([{ at: 1, kind: 'phone', tone: 'ok', text: 'x' }])[0].count).toBeUndefined()
   })
 })
 
