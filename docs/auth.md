@@ -38,6 +38,14 @@ response only: not stored, not logged, not audited (the trail records the device
 the private CA (a public certificate) so the phone trusts the server for the app's own connections.
 Settings: `NUXT_PHONE_SETUP_URL`, `NUXT_PHONE_SETUP_CA_FILE`, optional `NUXT_PHONE_SETUP_TAILNET_URL`.
 
+The same page lists the enrolled phones, the cars and their trips, and a week of activity. Anyone
+signed in (a passkey or an allowlisted Tailnet device) may read them. **Revoking** a phone stops it
+for good, on its very next request, and needs a passkey used in the last five minutes like an
+invitation does; the trail records who did it and the phone's name. The activity comes from
+cairn-server's audit log: phones joining and stopping, trips carried, history refreshes, and anything
+refused (an unsigned or wrongly signed request, a scope refusal). It never holds a trip's contents,
+a location, a token, a body hash or a Tailscale login.
+
 ## Cross-site requests
 
 A request that changes something and names another origin (`Origin`, `Sec-Fetch-Site`) is refused, even from a Tailnet address: that identity belongs to the machine, not to the page that asked. Session cookies are `HttpOnly` and `SameSite=Strict`, and `Secure` over HTTPS.

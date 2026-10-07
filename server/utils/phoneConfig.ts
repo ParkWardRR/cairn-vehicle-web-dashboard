@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs'
-
 export interface PhoneSetupConfig {
   base: string
   token: string
@@ -12,25 +10,13 @@ export interface PhoneSetupConfig {
 // (the same file cairn-server reads), so it is never copied into another environment file.
 export function phoneSetupConfig(): { ok: true, config: PhoneSetupConfig } | { ok: false, missing: string[] } {
   const c = useRuntimeConfig()
-  const missing: string[] = []
-  const base = (c.cairnLocalUrl as string) || ''
-  if (!base) missing.push('NUXT_CAIRN_LOCAL_URL')
+  const api = localApi()
+  const missing = 'missing' in api ? [...api.missing] : []
   const serverUrl = (c.phoneSetupUrl as string) || ''
   if (!serverUrl) missing.push('NUXT_PHONE_SETUP_URL')
-  const tokenFile = (c.cairnLocalTokenFile as string) || ''
-  let token = ''
-  if (!tokenFile) {
-    missing.push('NUXT_CAIRN_LOCAL_TOKEN_FILE')
-  } else {
-    try {
-      token = readFileSync(tokenFile, 'utf8').trim()
-    } catch {
-      missing.push('a readable NUXT_CAIRN_LOCAL_TOKEN_FILE')
-    }
-  }
-  if (missing.length) return { ok: false, missing }
+  if (missing.length || 'missing' in api) return { ok: false, missing }
   return {
     ok: true,
-    config: { base, token, serverUrl, tailnetUrl: (c.phoneSetupTailnetUrl as string) || '', caFile: (c.phoneSetupCaFile as string) || '' },
+    config: { base: api.base, token: api.token, serverUrl, tailnetUrl: (c.phoneSetupTailnetUrl as string) || '', caFile: (c.phoneSetupCaFile as string) || '' },
   }
 }
