@@ -52,7 +52,7 @@ while read -r method path; do
   rm -f "$out"
   case "$path" in
     # for people only: the read-only service token must be refused, and a 2xx here would be the failure
-    /api/auth/passkeys|/api/auth/audit)
+    /api/auth/passkeys|/api/auth/audit|/api/phones/status)
       if [ "$code" = 403 ]; then ok=$((ok+1)); else bad=$((bad+1)); echo "FAIL $code $path (expected 403 for the service token)"; fi
       continue ;;
   esac
