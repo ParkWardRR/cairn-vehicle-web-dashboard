@@ -42,6 +42,13 @@ export default defineNuxtConfig({
     tsdbUrl: 'http://127.0.0.1:8480',
     // Loopback cairn-server local API, for vehicle display names. Empty = ids only.
     cairnLocalUrl: '',
+    // "Add a phone": the file holding cairn-server's loopback write token (-app-local-token-file),
+    // the https URL(s) a phone reaches the app listener at, and the private CA the phone should
+    // trust. Empty CA file = the phone is sent no certificate (use a publicly trusted one).
+    cairnLocalTokenFile: '',
+    phoneSetupUrl: '',
+    phoneSetupTailnetUrl: '',
+    phoneSetupCaFile: '',
     // Place naming. Coordinates are sent to Overpass (and Geoapify, if a key is
     // set) to find names; results are cached on disk and never re-fetched.
     // Set NUXT_PLACES_EXTERNAL=false to keep all coordinates local.

@@ -35,6 +35,8 @@
   {"method": "GET", "path": "/api/device/reproducibility"},
   {"method": "GET", "path": "/api/device/tsdb-status"},
   {"method": "GET", "path": "/api/heatmap"},
+  {"method": "POST", "path": "/api/phones/invite"},
+  {"method": "GET", "path": "/api/phones/status"},
   {"method": "GET", "path": "/api/places"},
   {"method": "POST", "path": "/api/places/saved"},
   {"method": "DELETE", "path": "/api/places/saved/:id"},

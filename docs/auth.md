@@ -27,6 +27,17 @@ Passkeys only work on the origin named in `NUXT_AUTH_ORIGINS` (the browser enfor
 
 The service asks the local `tailscaled` (its LocalAPI socket) who owns the address a request came from. The address is the TCP peer, or, for a request that came through the reverse proxy on this machine, the address the proxy appended to `X-Forwarded-For`. The service listens on loopback only (`NITRO_HOST=127.0.0.1` in the unit), so nothing else can claim an address. Tagged devices never match.
 
+## Adding a phone
+
+**Add a phone** (`/phones`) makes a single-use invitation for the iPhone app and shows it as a QR code the
+camera opens. An invitation lets a phone read every trip, so it needs a passkey used in the last five minutes
+(`requireFresh`), like changing a passkey; a Tailnet address or the service token cannot. The code is in the
+response only: not stored, not logged, not audited (the trail records the device name). The invitation is a
+*user* one, valid ten minutes, made by cairn-server's loopback local API with its write token
+(`NUXT_CAIRN_LOCAL_TOKEN_FILE`, the file cairn-server reads with `-app-local-token-file`). The QR also carries
+the private CA (a public certificate) so the phone trusts the server for the app's own connections.
+Settings: `NUXT_PHONE_SETUP_URL`, `NUXT_PHONE_SETUP_CA_FILE`, optional `NUXT_PHONE_SETUP_TAILNET_URL`.
+
 ## Cross-site requests
 
 A request that changes something and names another origin (`Origin`, `Sec-Fetch-Site`) is refused, even from a Tailnet address: that identity belongs to the machine, not to the page that asked. Session cookies are `HttpOnly` and `SameSite=Strict`, and `Secure` over HTTPS.
