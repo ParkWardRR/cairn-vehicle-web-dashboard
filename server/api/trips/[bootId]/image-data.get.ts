@@ -14,7 +14,7 @@ export default defineEventHandler(async (event) => {
   const id = sqlString(bootId)
 
   const raw = await queryTsdbObjects(`
-    SELECT lat, lon, speed_mps, mono_ms, observed_at FROM position
+    SELECT lat, lon, speed_mps, mono_ms, observed_at FROM ${primaryPositions(id)}
     WHERE boot_id = ${id} AND lat != 0 AND lon != 0 ORDER BY mono_ms ASC
   `)
   if (!raw.length) throw createError({ statusCode: 404, statusMessage: 'Trip not found' })

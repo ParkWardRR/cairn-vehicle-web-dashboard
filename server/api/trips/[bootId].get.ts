@@ -12,13 +12,13 @@ export default defineEventHandler(async (event) => {
   const vid = sqlString(String(summary[0].vehicle_id ?? ''))
 
   const firstPos = await queryTsdbObjects(`
-    SELECT observed_at, lat, lon FROM position
+    SELECT observed_at, lat, lon FROM ${primaryPositions(bid)}
     WHERE boot_id = ${bid}
     ORDER BY mono_ms ASC LIMIT 1
   `)
 
   const lastPos = await queryTsdbObjects(`
-    SELECT observed_at, lat, lon FROM position
+    SELECT observed_at, lat, lon FROM ${primaryPositions(bid)}
     WHERE boot_id = ${bid}
     ORDER BY mono_ms DESC LIMIT 1
   `)
@@ -32,8 +32,8 @@ export default defineEventHandler(async (event) => {
       SELECT
         (SELECT min(mono_ms) FROM obd WHERE boot_id = ${bid}) AS first_obd_ms,
         (SELECT max(mono_ms) FROM obd WHERE boot_id = ${bid}) AS last_obd_ms,
-        (SELECT min(mono_ms) FROM position WHERE boot_id = ${bid}) AS first_pos_ms,
-        (SELECT min(mono_ms) FROM position WHERE boot_id = ${bid} AND lat != 0 AND lon != 0) AS first_fix_ms
+        (SELECT min(mono_ms) FROM ${primaryPositions(bid)}) AS first_pos_ms,
+        (SELECT min(mono_ms) FROM ${primaryPositions(bid)} WHERE lat != 0 AND lon != 0) AS first_fix_ms
     `),
     // The previous trip of this trip's own car: where another car last parked
     // says nothing about where this one started.

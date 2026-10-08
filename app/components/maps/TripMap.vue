@@ -2,6 +2,8 @@
 const props = defineProps<{
   coordinates: [number, number, number][]
   speeds: number[]
+  // Thin lines drawn over a dimmed main route, to compare sources on one map.
+  extraTracks?: Array<{ name: string; color: string; coordinates: [number, number, number][] }>
   headings?: number[]
   accuracies?: number[]
   sats?: number[]
@@ -165,6 +167,7 @@ function buildRoute(L: any) {
 
   if (validPoints.length < 2) return
 
+  const comparing = (props.extraTracks?.length ?? 0) > 0
   const segmentSize = Math.max(1, Math.floor(validPoints.length / 150))
 
   for (let i = 0; i < validPoints.length - 1; i += segmentSize) {
@@ -174,7 +177,7 @@ function buildRoute(L: any) {
 
     const polyline = L.polyline(
       segPts.map((p: any) => [p.lat, p.lng]),
-      { color: speedToColor(avgSpeedMph), weight: 5, opacity: 0.95, lineCap: 'round', lineJoin: 'round' },
+      { color: speedToColor(avgSpeedMph), weight: comparing ? 9 : 5, opacity: comparing ? 0.3 : 0.95, lineCap: 'round', lineJoin: 'round' },
     ).addTo(map)
 
     const midPt = segPts[Math.floor(segPts.length / 2)]
@@ -245,6 +248,11 @@ function buildRoute(L: any) {
 
   addStopMarkers(L)
 
+  for (const track of props.extraTracks ?? []) {
+    const pts = track.coordinates.filter(c => c[0] !== 0 && c[1] !== 0).map(c => [c[1], c[0]] as [number, number])
+    if (pts.length >= 2) L.polyline(pts, { color: track.color, weight: 2.5, opacity: 1, dashArray: track.name === 'Phone' ? '1, 6' : undefined, lineCap: 'round' }).addTo(map)
+  }
+
   L.marker([first.lat, first.lng], { icon: startIcon }).addTo(map)
   L.marker([last.lat, last.lng], { icon: endIcon }).addTo(map)
 
@@ -284,7 +292,7 @@ onMounted(async () => {
   }
 })
 
-watch(() => [props.coordinates, props.speeds, props.stops], async () => {
+watch(() => [props.coordinates, props.speeds, props.stops, props.extraTracks], async () => {
   if (!ready.value || !map) return
   map.eachLayer((layer: any) => {
     if (!layer._url && !layer._container?.classList?.contains('leaflet-control-container')) {
@@ -330,6 +338,7 @@ onUnmounted(() => {
       <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full" style="background: #22c55e" /> Cruise</span>
       <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full" style="background: #f59e0b" /> Fast</span>
       <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full" style="background: #ef4444" /> WOT</span>
+      <span v-for="t in extraTracks ?? []" :key="t.name" class="flex items-center gap-1 pl-2" style="border-left: 1px solid var(--color-border)"><span class="w-3 h-0.5" :style="{ background: t.color }" /> {{ t.name }}</span>
       <span v-if="stops?.length" class="flex items-center gap-1 pl-2" style="border-left: 1px solid var(--color-border)">Stops</span>
       <span v-if="stops?.length" class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm" style="background: #38bdf8" /> Short</span>
       <span v-if="stops?.length" class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm" style="background: #2dd4bf" /> Medium</span>

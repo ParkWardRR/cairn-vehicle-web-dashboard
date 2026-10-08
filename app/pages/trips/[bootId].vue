@@ -1,11 +1,14 @@
 <script setup lang="ts">
+type GpsTrack = 'combined' | 'device' | 'phone'
+interface RouteFeature {
+  type: string
+  geometry: { type: string; coordinates: [number, number, number][] }
+  properties: { track?: GpsTrack; speeds: number[]; timestamps: string[]; headings: number[]; accuracies: number[]; sats: number[] }
+}
 interface RouteData {
   type: string
-  features: Array<{
-    type: string
-    geometry: { type: string; coordinates: [number, number, number][] }
-    properties: { speeds: number[]; timestamps: string[]; headings: number[]; accuracies: number[]; sats: number[] }
-  }>
+  features: RouteFeature[]
+  sources?: { device: number; phone: number }
 }
 
 interface TripSummary {
@@ -154,19 +157,40 @@ const { data: insightsData } = useFetch<{ insights: Insight[] }>(
   () => `/api/trips/${bootId.value}/insights`,
 )
 
-const coordinates = computed<[number, number, number][]>(() => {
-  const feature = routeData.value?.features?.[0]
-  if (!feature || feature.geometry.type !== 'LineString') return []
-  return feature.geometry.coordinates
-})
+// Which GPS the map and the charts show: both receivers combined (the default), the dongle's
+// own, or the phone's; "compare" draws the combined line with each source's line over it.
+type GpsView = 'combined' | 'device' | 'phone' | 'compare'
+const gpsView = ref<GpsView>('combined')
+const bothSources = computed(() => (routeData.value?.sources?.device ?? 0) > 1 && (routeData.value?.sources?.phone ?? 0) > 1)
+const lineFeatures = computed(() => (routeData.value?.features ?? []).filter(f => f.geometry.type === 'LineString'))
+const trackOf = (t: GpsTrack) => lineFeatures.value.find(f => (f.properties.track ?? 'combined') === t)
 
-const speeds = computed<number[]>(() => {
-  return routeData.value?.features?.[0]?.properties?.speeds ?? []
+// The line everything else on the page (map colour, charts) is read from. With one source the
+// combined line is that source's own fixes.
+const activeFeature = computed(() => {
+  const want = gpsView.value === 'compare' ? 'combined' : gpsView.value
+  return trackOf(want) ?? lineFeatures.value[0]
 })
+const extraTracks = computed(() => {
+  if (gpsView.value !== 'compare') return []
+  const out: Array<{ name: string; color: string; coordinates: [number, number, number][] }> = []
+  const d = trackOf('device'), p = trackOf('phone')
+  if (d) out.push({ name: 'Device', color: '#3b82f6', coordinates: d.geometry.coordinates })
+  if (p) out.push({ name: 'Phone', color: '#f97316', coordinates: p.geometry.coordinates })
+  return out
+})
+const gpsViews = [
+  { id: 'combined', label: 'Combined' },
+  { id: 'device', label: 'Device' },
+  { id: 'phone', label: 'Phone' },
+  { id: 'compare', label: 'Both lines' },
+] as const
 
-const headings = computed(() => routeData.value?.features?.[0]?.properties?.headings ?? [])
-const accuracies = computed(() => routeData.value?.features?.[0]?.properties?.accuracies ?? [])
-const sats = computed(() => routeData.value?.features?.[0]?.properties?.sats ?? [])
+const coordinates = computed<[number, number, number][]>(() => activeFeature.value?.geometry.coordinates ?? [])
+const speeds = computed<number[]>(() => activeFeature.value?.properties?.speeds ?? [])
+const headings = computed(() => activeFeature.value?.properties?.headings ?? [])
+const accuracies = computed(() => activeFeature.value?.properties?.accuracies ?? [])
+const sats = computed(() => activeFeature.value?.properties?.sats ?? [])
 
 function fmtMs(ms: number): string {
   const sec = ms / 1000
@@ -354,11 +378,22 @@ function insightIcon(icon: string | undefined): string {
       <!-- Map + stops -->
       <div class="grid gap-4 mb-4 lg:grid-cols-[minmax(0,1fr)_300px]">
       <div class="min-w-0 space-y-3">
+      <div v-if="bothSources" class="flex flex-wrap items-center gap-2" role="group" aria-label="Which GPS to show">
+        <span class="text-[11px] font-semibold uppercase tracking-wider" style="color: var(--color-text-secondary)">GPS</span>
+        <button
+          v-for="v in gpsViews" :key="v.id" type="button"
+          class="rounded-lg px-3 py-1 text-[12px] font-medium border transition-colors"
+          :aria-pressed="gpsView === v.id"
+          :style="{ borderColor: gpsView === v.id ? 'var(--color-accent)' : 'var(--color-border)', background: gpsView === v.id ? 'var(--color-accent-soft)' : 'transparent', color: gpsView === v.id ? 'var(--color-accent)' : 'var(--color-text-secondary)' }"
+          @click="gpsView = v.id"
+        >{{ v.label }}</button>
+      </div>
       <div class="rounded-xl overflow-hidden" :style="{ border: '1px solid var(--color-border)' }">
         <ClientOnly>
           <div v-if="hasValidRoute" style="height: 420px">
             <MapsTripMap
               :coordinates="coordinates"
+              :extra-tracks="extraTracks"
               :speeds="speeds"
               :headings="headings"
               :accuracies="accuracies"
@@ -494,6 +529,8 @@ function insightIcon(icon: string | undefined): string {
           </template>
         </ClientOnly>
       </div>
+
+      <TripsGpsCompare :boot-id="bootId" />
 
       <!-- Speed / Elevation sparkline -->
       <div class="rounded-xl p-4 mb-6" :style="{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }">

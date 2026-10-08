@@ -1024,8 +1024,9 @@ describe('bad input', () => {
 describe('missing capability: the store is not there', () => {
   const fakeBoot = { bootId: UNKNOWN_BOOT }
 
+  // (the phones routes talk to cairn-server, not the store, and are human-only)
   it('every store-backed route answers 502 "store unreachable": a JSON error, quickly', async () => {
-    const routes = inventory.filter(r => r.method === 'GET' && !r.path.startsWith('/api/places/saved') && !r.path.startsWith('/api/auth/') && !r.path.startsWith('/api/annotations') && !r.path.startsWith('/api/data/'))
+    const routes = inventory.filter(r => r.method === 'GET' && !r.path.startsWith('/api/places/saved') && !r.path.startsWith('/api/auth/') && !r.path.startsWith('/api/annotations') && !r.path.startsWith('/api/data/') && !r.path.startsWith('/api/phones'))
     for (const r of routes) {
       const started = Date.now()
       const res = await GET(DOWN, r.path, { params: fakeBoot, query: { boot_id: UNKNOWN_BOOT } })

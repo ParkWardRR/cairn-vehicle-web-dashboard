@@ -51,6 +51,7 @@
   {"method": "GET", "path": "/api/trips/:bootId"},
   {"method": "GET", "path": "/api/trips/:bootId/events"},
   {"method": "GET", "path": "/api/trips/:bootId/fuel"},
+  {"method": "GET", "path": "/api/trips/:bootId/gps-compare"},
   {"method": "GET", "path": "/api/trips/:bootId/image-data"},
   {"method": "GET", "path": "/api/trips/:bootId/insights"},
   {"method": "GET", "path": "/api/trips/:bootId/route"},

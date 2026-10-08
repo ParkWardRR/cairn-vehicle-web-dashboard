@@ -57,7 +57,7 @@ you are on one). Light, dark and automatic themes are in the sidebar footer.
 | --- | --- | --- |
 | **Home** (`/`) | simple | Totals (trips, distance, drive time, top speed), a heat map of every drive, the last trip, device health, recent trips. Detailed views add engine highlights (peak boost, top RPM, air-fuel balance, fuel trims). |
 | **Trips** (`/trips`) | simple | Every drive, newest first, with search: free text over your notes, tags and the names of saved places a trip visited; filter by tag, bookmark or date range. |
-| **Trip** (`/trips/<id>`) | simple | One drive: route on a map coloured by speed, playback scrubber, stops (with icons for the kind of place), GPS health, speed and elevation, estimated fuel use, "trip insights" cards, bookmark/tags/note, and **Save a picture**. |
+| **Trip** (`/trips/<id>`) | simple | One drive: route on a map coloured by speed (the dongle's GPS and the phone's combined, or either alone, or both lines over each other), playback scrubber, stops (with icons for the kind of place), GPS health, **GPS: device and phone** (how the two differed and how close each came to the car's own speed and distance), speed and elevation, estimated fuel use, "trip insights" cards, bookmark/tags/note, and **Save a picture**. |
 | **Statistics** (`/stats`) | simple | Trips, distance, time driving and top speed for a week, month, quarter, year or custom range, compared with the period before, with a distance chart with no gaps. |
 | **Places** (`/places`) | simple | A map and list of where you stopped and where trips started and ended. Name them, pick a kind, confirm or remove the ones the system learned; export and import. |
 | **Your device** (`/system`) | simple | Battery, signal, temperature, storage, last contact, the uploads (bundles) that have arrived and the state of the store behind the site. |
@@ -634,3 +634,25 @@ History before the split is preserved here; see [MIGRATION.md](MIGRATION.md). Th
 ## License
 
 Blue Oak Model License 1.0.0, see [LICENSE](LICENSE).
+
+## Two GPS tracks per trip
+
+The dongle records its own GNSS fixes, and the phone's GPS when the Cairn app is connected (the app hands its fixes to
+the dongle over Bluetooth; the store marks them with bit 5 of `source_flags`). A trip with both shows a **GPS** toggle
+above the map: *Combined* (the default), *Device*, *Phone*, or *Both lines*.
+
+- **Combined** is one point per second. Where both receivers have a fix in that second the two positions are averaged
+  with weights of 1 / accuracy², so the better receiver counts for more; elsewhere it is whichever one had a fix. A
+  receiver's own jumps (an implied speed over 200 km/h) are dropped first. A trip with one source shows that source's
+  fixes unchanged.
+- **GPS: device and phone** (under the map, `GET /api/trips/<id>/gps-compare`) lists each source's fixes, update rate,
+  time with a fix, gaps, stated accuracy, distance, and speed and distance against the car's own OBD speed, then how
+  the two differed: typical, 95th-percentile and largest gap in metres, the share within 5 m and 10 m, which way the
+  phone sat relative to the device, and a chart over the trip.
+- Position has no ground truth, so each receiver's accuracy is what it states (the dongle's from HDOP × 4 m when it
+  states none, and the page says so), and the disagreement between the two is the measure. Speed and distance are
+  checked against OBD, which is ground truth for those.
+- Each device fix is compared with the phone's position *at the same instant*, interpolated between the phone's two
+  nearest fixes; otherwise the delay the phone's fixes pick up crossing Bluetooth would show up as GPS error.
+- Everything else on the trip page (distance, stops, elevation, fuel) reads a single track: the device's, or the
+  phone's when the dongle never had a fix (`primaryPositions` in `server/utils/sql.ts`), so a road is never driven twice.

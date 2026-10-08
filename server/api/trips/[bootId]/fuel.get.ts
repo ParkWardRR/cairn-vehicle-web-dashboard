@@ -26,7 +26,7 @@ export default defineEventHandler(async (event) => {
       SELECT coalesce(sum(speed_mps * least(lead_ms - mono_ms, 10000) / 1000.0), 0) AS distance_m
       FROM (
         SELECT mono_ms, speed_mps, lead(mono_ms) OVER (ORDER BY mono_ms) AS lead_ms
-        FROM position WHERE boot_id = ${id} AND speed_mps IS NOT NULL
+        FROM ${primaryPositions(id)} WHERE boot_id = ${id} AND speed_mps IS NOT NULL
       ) WHERE lead_ms IS NOT NULL
     `),
     queryTsdbObjects(`SELECT duration_s FROM v_drive_summary WHERE boot_id = ${id}`),

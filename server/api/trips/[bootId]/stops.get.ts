@@ -5,7 +5,7 @@ export default defineEventHandler(async (event) => {
 
   const fixes = await queryTsdbObjects(`
     SELECT lat, lon, speed_mps, mono_ms, observed_at
-    FROM position
+    FROM ${primaryPositions(id)}
     WHERE boot_id = ${id} AND lat != 0 AND lon != 0
     ORDER BY mono_ms ASC
   `)
