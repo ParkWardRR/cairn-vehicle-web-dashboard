@@ -88,6 +88,7 @@ web() { # port store-port places-dir
   NUXT_AUTH_SERVICE_TOKEN="$SERVICE_TOKEN" NUXT_AUTH_BOOTSTRAP_CODE="$BOOTSTRAP_CODE" \
   NUXT_AUTH_ORIGINS="http://127.0.0.1:$1" NUXT_AUTH_TAILNET_USERS="owner@example.test" \
   NUXT_AUTH_TAILSCALE_SOCKET="$FAKE_TAILSCALE" \
+  NUXT_AUTH_APPLE_APPS="$([ "$1" = "$WEB_DATA" ] && echo ABCDE12345.app.cairn.companion || true)" \
   NITRO_PORT="$1" NITRO_HOST=127.0.0.1 NUXT_TSDB_URL="http://127.0.0.1:$2" \
     NUXT_PLACES_EXTERNAL=false NUXT_PLACES_DATA_DIR="$3" \
     node .output/server/index.mjs >"$RUN/web-$1.log" 2>&1 &

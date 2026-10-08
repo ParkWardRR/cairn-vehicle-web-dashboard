@@ -254,6 +254,20 @@ describe('access control: passkeys', () => {
     expect(set).toMatch(/Max-Age=\d{6,}/)
   })
 
+  it('signs in from a request that names no credential: what Safari autofill and an iOS app send', async () => {
+    const o = await send(EMPTY, 'POST', '/api/auth/login-options', { json: { discoverable: true } })
+    expect(o.status, o.text).toBe(200)
+    expect(o.body.options.allowCredentials ?? []).toEqual([])
+    expect(o.body.options.userVerification).toBe('required')
+    // the same passkey, a client that sends no Origin header (a native app)
+    const v = await send(EMPTY, 'POST', '/api/auth/login-verify', { json: { challengeId: o.body.challengeId, response: first.a.assert(o.body.options) } })
+    expect(v.status, v.text).toBe(200)
+    expect(cookieOf(v)).not.toBe('')
+    // and a normal request still names the passkeys it will accept
+    const plain = await send(EMPTY, 'POST', '/api/auth/login-options', { json: {} })
+    expect(plain.body.options.allowCredentials.length).toBeGreaterThan(0)
+  })
+
   it('refuses a bad assertion: tampered signature, wrong origin, no user verification, replayed or unknown challenge', async () => {
     const bad = async (over: Parameters<VirtualAuthenticator['assert']>[1]) => {
       const o = await send(EMPTY, 'POST', '/api/auth/login-options', { json: {} })
@@ -317,6 +331,23 @@ describe('access control: passkeys', () => {
     expect(actions).toEqual(expect.arrayContaining(['passkey-added', 'login', 'login-failed', 'passkey-removed', 'logout']))
     for (const a of r.body.audit) expect(Object.keys(a).sort()).toEqual(['action', 'actor', 'id', 'method', 'target', 'ts'])
     for (const secret of [BOOTSTRAP_CODE, SERVICE_TOKEN, 'cairn_session=']) expect(r.text).not.toContain(secret)
+  })
+})
+
+describe('access control: the Apple association file', () => {
+  it('is served with no sign-in, as JSON, naming only the configured app', async () => {
+    const r = await send(DATA, 'GET', '/.well-known/apple-app-site-association')
+    expect(r.status, r.text).toBe(200)
+    expect(r.headers.get('content-type')).toMatch(/application\/json/)
+    expect(r.body).toEqual({ webcredentials: { apps: ['ABCDE12345.app.cairn.companion'] } })
+  })
+
+  it('is absent where no app is configured', async () => {
+    expect((await send(EMPTY, 'GET', '/.well-known/apple-app-site-association')).status).toBe(404)
+  })
+
+  it('does not open anything else under /.well-known', async () => {
+    expect((await send(DATA, 'GET', '/.well-known/other')).status).not.toBe(200)
   })
 })
 

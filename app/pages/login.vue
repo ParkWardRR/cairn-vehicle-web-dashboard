@@ -3,7 +3,7 @@ import type { AuthSession } from '~/composables/usePasskeys'
 
 definePageMeta({ layout: false })
 const route = useRoute()
-const { signIn, addPasskey } = usePasskeys()
+const { signIn, signInWithAutofill, autofillAvailable, addPasskey } = usePasskeys()
 
 const { data: session } = await useFetch<AuthSession>('/api/auth/session')
 const next = computed(() => safeNext(route.query.next))
@@ -11,7 +11,21 @@ const code = ref('')
 const busy = ref(false)
 const error = ref('')
 const supported = ref(true)
-onMounted(() => { supported.value = typeof window.PublicKeyCredential !== 'undefined' })
+const autofill = ref(false)
+onMounted(async () => {
+  supported.value = typeof window.PublicKeyCredential !== 'undefined'
+  // Offer the saved passkey over the field below as soon as the page is up, where the browser can.
+  if (supported.value && (session.value?.passkeys ?? 0) > 0 && !session.value?.authenticated && await autofillAvailable()) {
+    autofill.value = true
+    try {
+      await signInWithAutofill()
+      window.location.assign(next.value)
+    } catch (e: any) {
+      // cancelled by the sign-in button, or the page was left: nothing to say
+      if (e?.name !== 'AbortError' && e?.name !== 'NotAllowedError') error.value = errorText(e)
+    }
+  }
+})
 
 async function run(fn: () => Promise<unknown>) {
   busy.value = true
@@ -55,6 +69,11 @@ const doEnrol = () => run(() => addPasskey('First passkey', code.value.trim() ||
       </template>
 
       <template v-else-if="session && session.passkeys > 0">
+        <input
+          v-if="autofill" type="text" name="username" autocomplete="username webauthn" aria-label="Saved passkey"
+          placeholder="Tap here to use your saved passkey"
+          class="w-full rounded-lg px-3 py-2 text-sm mb-3 border" style="background: var(--color-bg); border-color: var(--color-border)"
+        >
         <button class="w-full rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50" :disabled="busy || !supported" style="background: var(--color-accent); color: white" @click="doSignIn">
           {{ busy ? 'Waiting for your passkey…' : 'Sign in with a passkey' }}
         </button>

@@ -2,7 +2,7 @@
 
 export interface HeaderBag { get(name: string): string | null | undefined }
 
-const PUBLIC_EXACT = new Set(['/login', '/favicon.svg', '/favicon.ico', '/apple-touch-icon.svg', '/site.webmanifest'])
+const PUBLIC_EXACT = new Set(['/login', '/favicon.svg', '/favicon.ico', '/apple-touch-icon.svg', '/site.webmanifest', '/.well-known/apple-app-site-association'])
 
 // Reachable without a session. /api/auth/* does its own checks inside each handler.
 // Bundles and static files hold no data; every page and every other route needs an identity.
@@ -64,6 +64,12 @@ export function isTailnetAddress(ip: string | null | undefined): boolean {
 
 export function trustsProxy(peer: string | undefined): boolean {
   return isLoopback(peer)
+}
+
+// App IDs for the Apple association file: `TEAMID.bundle.id`. Anything else is dropped, so a typo
+// cannot publish a half-formed entry.
+export function appleAppIds(v: string | undefined | null): string[] {
+  return parseList(v).filter(id => /^[A-Z0-9]{10}\.[A-Za-z0-9.-]+$/.test(id))
 }
 
 export function parseList(v: string | undefined | null): string[] {

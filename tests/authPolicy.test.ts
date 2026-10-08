@@ -1,13 +1,13 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import { bearerToken, clientIp, csrfRefusal, isApiPath, isPublicPath, isTailnetAddress, parseList, tailnetLogin, trustsProxy } from '../server/utils/authPolicy'
+import { appleAppIds, bearerToken, clientIp, csrfRefusal, isApiPath, isPublicPath, isTailnetAddress, parseList, tailnetLogin, trustsProxy } from '../server/utils/authPolicy'
 
 const h = (o: Record<string, string>) => ({ get: (n: string) => o[n.toLowerCase()] ?? null })
 
 describe('which paths are public', () => {
   it('the auth routes, the login page and static bundles only', () => {
-    for (const p of ['/login', '/_nuxt/entry.js', '/api/auth/session', '/api/auth/login-verify', '/favicon.svg']) expect(isPublicPath(p), p).toBe(true)
-    for (const p of ['/', '/trips', '/api/trips', '/api/heatmap', '/api/places/saved', '/api/authx', '/api/auth-not', '/loginx', '/_payload.json', '/api']) expect(isPublicPath(p), p).toBe(false)
+    for (const p of ['/login', '/_nuxt/entry.js', '/api/auth/session', '/api/auth/login-verify', '/favicon.svg', '/.well-known/apple-app-site-association']) expect(isPublicPath(p), p).toBe(true)
+    for (const p of ['/', '/trips', '/api/trips', '/api/heatmap', '/api/places/saved', '/api/authx', '/api/auth-not', '/loginx', '/_payload.json', '/api', '/.well-known/', '/.well-known/apple-app-site-association/x', '/.well-known/other']) expect(isPublicPath(p), p).toBe(false)
   })
   it('knows an API path', () => {
     expect(isApiPath('/api/trips')).toBe(true)
@@ -85,5 +85,13 @@ describe('small parsers', () => {
     expect(bearerToken(h({ authorization: 'bearer x' }))).toBe('x')
     expect(bearerToken(h({ authorization: 'Basic abc' }))).toBeNull()
     expect(bearerToken(h({}))).toBeNull()
+  })
+})
+
+describe('appleAppIds', () => {
+  it('keeps well-formed TEAMID.bundle ids and drops the rest', () => {
+    expect(appleAppIds('ABCDE12345.app.cairn.companion, nope, abcde12345.app.x,ABCDE12345.')).toEqual(['ABCDE12345.app.cairn.companion'])
+    expect(appleAppIds('')).toEqual([])
+    expect(appleAppIds(undefined)).toEqual([])
   })
 })

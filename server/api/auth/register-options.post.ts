@@ -35,6 +35,8 @@ async function handle(event: H3Event) {
     attestationType: 'none',
     excludeCredentials: store.credentials().map(c => ({ id: c.id, transports: c.transports as any })),
     authenticatorSelection: { residentKey: 'preferred', userVerification: 'required' },
+    // this phone or computer first (iCloud Keychain, Google Password Manager, 1Password), then a nearby phone
+    hints: ['client-device', 'hybrid'],
   })
   return { challengeId: putChallenge(options.challenge, 'register', actor), options }
 }

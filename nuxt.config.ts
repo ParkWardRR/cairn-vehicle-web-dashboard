@@ -66,6 +66,9 @@ export default defineNuxtConfig({
     // Where passkeys may be used: the public origin(s) the browser sees, e.g. https://cairn.example.lan
     authOrigins: '',
     authRpId: '',
+    // Apple app IDs (TEAMID.bundle.id, comma-separated) allowed to use this site's passkeys; empty
+    // publishes no association file.
+    authAppleApps: '',
     authSessionDays: '30',
     // State directory for auth.sqlite, the service token and the one-time enrolment code.
     // Empty = the places data directory.

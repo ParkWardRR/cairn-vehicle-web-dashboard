@@ -24,11 +24,12 @@ export function webauthnConfig(event: H3Event): { rpID: string; origins: string[
 interface Challenge { challenge: string; kind: 'register' | 'login'; expires: number; actor: string }
 const challenges = new Map<string, Challenge>()
 
-export function putChallenge(challenge: string, kind: Challenge['kind'], actor: string): string {
+// `ttlMs` is longer for passkey autofill, where the prompt may sit on screen while someone types elsewhere.
+export function putChallenge(challenge: string, kind: Challenge['kind'], actor: string, ttlMs = 2 * 60_000): string {
   const now = Date.now()
   for (const [k, v] of challenges) if (v.expires < now) challenges.delete(k)
   const id = randomBytes(16).toString('base64url')
-  challenges.set(id, { challenge, kind, expires: now + 2 * 60_000, actor })
+  challenges.set(id, { challenge, kind, expires: now + ttlMs, actor })
   return id
 }
 
