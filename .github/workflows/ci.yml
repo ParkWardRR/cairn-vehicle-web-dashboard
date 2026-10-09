@@ -38,7 +38,14 @@ jobs:
       - name: Install
         run: npm ci
 
+      # tests/storeContract.test.ts reads the pinned store/v1 schema. Without this step the
+      # pin is decoration, which is how it sat four releases behind without anything noticing.
+      - name: Fetch the pinned contracts
+        run: scripts/fetch-contracts.sh
+
       # tests/routes.test.ts fails when the route inventory drifts from server/api.
+      # tests/storeContract.test.ts fails when the build reads a relation the contract
+      # does not declare.
       - name: Unit tests
         run: npx vitest run
 
