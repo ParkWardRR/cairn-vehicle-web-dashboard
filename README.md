@@ -1,5 +1,5 @@
 <!-- cairn-nav:start -->
-<p align="center"><b>Cairn is a family of five repositories.</b> Each builds, tests and releases on its own; they agree through the shared <a href="https://github.com/ParkWardRR/cairn-driving-log-selfhosted/tree/main/contracts">contracts</a>.</p>
+<p align="center"><b>Cairn is a family of six repositories.</b> Each builds, tests and releases on its own; they agree through the shared <a href="https://github.com/ParkWardRR/cairn-driving-log-selfhosted/tree/main/contracts">contracts</a>, and they share one <a href="https://github.com/ParkWardRR/cairn-driving-log-selfhosted/blob/main/ROADMAP.md">roadmap</a>.</p>
 
 | Part | Repository | What it does | Stack | Docs | Issues | CI |
 |---|---|---|---|---|---|---|
@@ -8,22 +8,64 @@
 | Phone | [cairn-ios-companion-app](https://github.com/ParkWardRR/cairn-ios-companion-app) | BLE relay, GPS assist, server client | Swift · SwiftUI | [docs](https://github.com/ParkWardRR/cairn-ios-companion-app/tree/main/docs) | [issues](https://github.com/ParkWardRR/cairn-ios-companion-app/issues) | [CI](https://github.com/ParkWardRR/cairn-ios-companion-app/actions) |
 | Server | [cairn-vehicle-server](https://github.com/ParkWardRR/cairn-vehicle-server) | Verifies, decrypts, stores; serves app and dashboard | Go | [docs](https://github.com/ParkWardRR/cairn-vehicle-server/tree/main/docs) | [issues](https://github.com/ParkWardRR/cairn-vehicle-server/issues) | [CI](https://github.com/ParkWardRR/cairn-vehicle-server/actions) |
 | Dashboard | **[cairn-vehicle-web-dashboard](https://github.com/ParkWardRR/cairn-vehicle-web-dashboard)** ◀ you are here | Browser UI: trips, places, engine, health | Nuxt · TypeScript | [docs](https://github.com/ParkWardRR/cairn-vehicle-web-dashboard/tree/main/docs) | [issues](https://github.com/ParkWardRR/cairn-vehicle-web-dashboard/issues) | [CI](https://github.com/ParkWardRR/cairn-vehicle-web-dashboard/actions) |
+| Modules | [cairn-modules](https://github.com/ParkWardRR/cairn-modules) | Interpretation, separated from the logging core: one package per module | YAML · Rust | [readme](https://github.com/ParkWardRR/cairn-modules#readme) | [issues](https://github.com/ParkWardRR/cairn-modules/issues) | [CI](https://github.com/ParkWardRR/cairn-modules/actions) |
 
 <sub>Shared: [Roadmap](https://github.com/ParkWardRR/cairn-driving-log-selfhosted/blob/main/ROADMAP.md) · [Install](https://github.com/ParkWardRR/cairn-driving-log-selfhosted/blob/main/INSTALL.md) · [Architecture](https://github.com/ParkWardRR/cairn-driving-log-selfhosted/blob/main/docs/architecture.md) · [Threat model](https://github.com/ParkWardRR/cairn-driving-log-selfhosted/blob/main/docs/threat-model.md) · [Trust model](https://github.com/ParkWardRR/cairn-driving-log-selfhosted/blob/main/docs/trust-model-v3.md) · [Contracts](https://github.com/ParkWardRR/cairn-driving-log-selfhosted/tree/main/contracts) · [Archive of the original monorepo](https://github.com/ParkWardRR/cairn-original-monorepo-archive)</sub>
 <!-- cairn-nav:end -->
+<h1 align="center">Cairn vehicle web dashboard</h1>
+<p align="center"><strong>See your drives. The website for a driving log that lives on your own computer.</strong></p>
 
-# Cairn vehicle web dashboard
+<p align="center">
+  <a href="https://github.com/ParkWardRR/cairn-vehicle-web-dashboard/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/ParkWardRR/cairn-vehicle-web-dashboard/ci.yml?style=flat-square&label=CI" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Blue_Oak_1.0.0-2E86C1?style=flat-square" alt="Blue Oak Model License 1.0.0"></a>
+  <img src="https://img.shields.io/badge/stack-Nuxt_4_·_Vue_3-2E86C1?style=flat-square" alt="Nuxt 4 and Vue 3">
+  <img src="https://img.shields.io/badge/sign--in-passkey_·_Tailnet-27AE60?style=flat-square" alt="Passkey and Tailnet identity sign-in">
+  <img src="https://img.shields.io/badge/cloud-none-95A5A6?style=flat-square" alt="No cloud">
+  <img src="https://img.shields.io/badge/account-none-95A5A6?style=flat-square" alt="No account">
+</p>
 
-[![CI](https://github.com/ParkWardRR/cairn-vehicle-web-dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/ParkWardRR/cairn-vehicle-web-dashboard/actions/workflows/ci.yml)
-[![License: Blue Oak 1.0.0](https://img.shields.io/badge/license-Blue%20Oak%201.0.0-blue)](LICENSE)
+<p align="center">
+  <img src="docs/screenshots/dashboard.png" alt="The Home page over the invented demo drives: totals, a heat map of every drive, the last trip and the device's health" width="820">
+</p>
+<p align="center"><sub>The Home page, on invented demo drives — no car and no device needed to try it.</sub></p>
 
-**See your drives.** This is the website for the [Cairn driving log](https://github.com/ParkWardRR/cairn-driving-log-selfhosted):
-a small device in your car records each drive, and this site shows them to you: where you went, how far and how
-long, how the car is doing, and what you want to remember about each trip. It runs on your own computer or home
-server, with no account at any cloud service. Nothing is sent to anyone except map tiles, web fonts and, if you
-leave it on, place-name lookups (see [Privacy](#privacy)).
+---
 
-![The Home page over the invented demo drives: totals, a heat map of every drive, the last trip and the device's health](docs/screenshots/dashboard.png)
+This is the website for the [Cairn driving log](https://github.com/ParkWardRR/cairn-driving-log-selfhosted): a small
+device in your car records each drive, and this site shows them to you — where you went, how far and how long, how the
+car is doing, and what you want to remember about each trip. It runs on your own computer or home server, with no
+account at any cloud service. Nothing is sent to anyone except map tiles, web fonts and, if you leave it on,
+place-name lookups (see [Privacy](#privacy)).
+
+**Contents:**
+[Who it is for](#who-it-is-for) ·
+[What is here](#what-is-in-this-repository) ·
+[Page by page](#page-by-page) ·
+[How it fits together](#how-it-fits-together) ·
+[Authentication](#authentication) ·
+[Privacy](#privacy) ·
+[Your data](#your-data) ·
+[Places](#places) ·
+[Two GPS tracks](#two-gps-tracks-per-trip) ·
+[Run it](#run-it) ·
+[Configuration](#configuration-reference) ·
+[API](#api-overview) ·
+[Test](#test) ·
+[Deploy](#deploy) ·
+[Status](#status) ·
+[Layout](#repository-layout) ·
+[Troubleshooting](#troubleshooting) ·
+[FAQ](#faq) ·
+[License](#license)
+
+> **Where this is going** is not in this README. The project keeps **one** roadmap, for all six repositories:
+> [ROADMAP.md](https://github.com/ParkWardRR/cairn-driving-log-selfhosted/blob/main/ROADMAP.md). This repository's next
+> work is network and LTE settings for the dongle
+> ([Phase 28](https://github.com/ParkWardRR/cairn-driving-log-selfhosted/blob/main/ROADMAP.md#phase-28--the-networked-dongle-finished--in-progress)),
+> engine-aware views driven by a module rather than hard-coded N20 assumptions
+> ([M4](https://github.com/ParkWardRR/cairn-driving-log-selfhosted/blob/main/ROADMAP.md#m1m7--the-module-system--in-progress)),
+> and the health and tune views
+> ([Phase 30](https://github.com/ParkWardRR/cairn-driving-log-selfhosted/blob/main/ROADMAP.md#phase-30--insight-history-health-and-engine-aware-views--in-progress)).
 
 ## Who it is for
 
@@ -380,6 +422,28 @@ of at least 0.5 is saved automatically as **learned**; edit or confirm it and it
 remembered as rejected so it is not learned again. Kinds (Home, Work, Gym, Food, Fuel and so on) pick the icon and
 rank the suggested names. The engine only ever *suggests* Home. Everything is in [docs/places.md](docs/places.md).
 
+## Two GPS tracks per trip
+
+The dongle records its own GNSS fixes, and the phone's GPS when the Cairn app is connected (the app hands its fixes to
+the dongle over Bluetooth; the store marks them with bit 5 of `source_flags`). A trip with both shows a **GPS** toggle
+above the map: *Combined* (the default), *Device*, *Phone*, or *Both lines*.
+
+- **Combined** is one point per second. Where both receivers have a fix in that second the two positions are averaged
+  with weights of 1 / accuracy², so the better receiver counts for more; elsewhere it is whichever one had a fix. A
+  receiver's own jumps (an implied speed over 200 km/h) are dropped first. A trip with one source shows that source's
+  fixes unchanged.
+- **GPS: device and phone** (under the map, `GET /api/trips/<id>/gps-compare`) lists each source's fixes, update rate,
+  time with a fix, gaps, stated accuracy, distance, and speed and distance against the car's own OBD speed, then how
+  the two differed: typical, 95th-percentile and largest gap in metres, the share within 5 m and 10 m, which way the
+  phone sat relative to the device, and a chart over the trip.
+- Position has no ground truth, so each receiver's accuracy is what it states (the dongle's from HDOP × 4 m when it
+  states none, and the page says so), and the disagreement between the two is the measure. Speed and distance are
+  checked against OBD, which is ground truth for those.
+- Each device fix is compared with the phone's position *at the same instant*, interpolated between the phone's two
+  nearest fixes; otherwise the delay the phone's fixes pick up crossing Bluetooth would show up as GPS error.
+- Everything else on the trip page (distance, stops, elevation, fuel) reads a single track: the device's, or the
+  phone's when the dongle never had a fix (`primaryPositions` in `server/utils/sql.ts`), so a road is never driven twice.
+
 ## Run it
 
 You need Node.js 22 or newer (the server uses the built-in `node:sqlite`).
@@ -531,6 +595,11 @@ flowchart TD
 
 `contracts.lock` pins the protocol release: contracts tag `contracts-v0.1.0` of the front-door repository (and the
 commit it must resolve to), with the store protocol `store/v1`. `scripts/fetch-contracts.sh` fetches and verifies it.
+That pin is **four releases behind** the current `contracts-v0.5.0`, which is not automatically wrong — this layer bumps
+when it needs a change — but it is what stands between this site and every `store/v1` addition since 1.0, including the
+period views and the module surface
+([what a bump unblocks](https://github.com/ParkWardRR/cairn-driving-log-selfhosted/blob/main/ROADMAP.md#contract-pins-and-what-a-bump-unblocks),
+[web #10](https://github.com/ParkWardRR/cairn-vehicle-web-dashboard/issues/10)).
 `server.lock` records the vehicle-server revision this layer was last checked against and the contract it requires
 of it: a compatible store schema, not "a server at least this new". There is no server release yet, so `tag` is
 empty and the commit is the pin; staged acceptance builds the demo store from exactly that commit.
@@ -543,6 +612,7 @@ empty and the commit is the pin; staged acceptance builds the demo store from ex
 | **Deployed** | Running on the author's home server behind Caddy, deployed with `deploy-ui.sh`. Your own deployment is yours to verify; the staged suite is what CI proves. |
 | **Planned, not built** | **Wi-Fi and LTE settings for the dongle in the web UI** ([web #16](https://github.com/ParkWardRR/cairn-vehicle-web-dashboard/issues/16)). It had to wait for authentication ([web #15](https://github.com/ParkWardRR/cairn-vehicle-web-dashboard/issues/15)), which now exists, with the fresh-passkey gate it will use. No settings page or route exists yet, and the configuration contract, server support and firmware receiver it depends on are tracked in the front-door [ROADMAP](https://github.com/ParkWardRR/cairn-driving-log-selfhosted/blob/main/ROADMAP.md). **Sharing** trips beyond the redacted picture (a portable file with redaction, never a hosted service) waits on its threat model and the reserved `share/v1` contract. Vehicle-insight work (a tune record, baselines, a plain health summary) is on the roadmap, not here. |
 | **Limits today** | One owner: every passkey belongs to the same person. Figures are shown in US units. Edits to places and trip marks are not in the audit trail. |
+| **Built but unconfirmed** | The **real iOS passkey sheet** has not been through a device: the flow was built and tested against a simulator build, and this host is not reachable by Apple's CDN, so an iPhone needs `?mode=developer` on the domain, Associated Domains Development enabled and a dev-signed build. The **GPS comparison panel** has never seen real phone data — the live store holds zero phone positions, because nobody has yet driven with the app armed during a recorded trip — so it was exercised against a synthetic phone track. |
 
 ## Repository layout
 
@@ -621,12 +691,16 @@ to the store means running `tests/staging.sh --capture` and committing `deploy/r
 host names, addresses, keys and personal locations out of the repository. CI runs on a self-hosted runner, and only
 for branches of this repository (see `tests/check-runners.sh`).
 
+**Do not add a roadmap here.** The project keeps one, in the front door repository. This README says what the site is and
+what it has running; the plan lives there.
+
 ## Related repositories
 
-- [cairn-driving-log-selfhosted](https://github.com/ParkWardRR/cairn-driving-log-selfhosted): the front door, system docs and the shared contracts
+- [cairn-driving-log-selfhosted](https://github.com/ParkWardRR/cairn-driving-log-selfhosted): the front door — system docs, the one [roadmap](https://github.com/ParkWardRR/cairn-driving-log-selfhosted/blob/main/ROADMAP.md) and the shared contracts
 - [cairn-vehicle-server](https://github.com/ParkWardRR/cairn-vehicle-server): the vehicle server and the `cairn-tsdb` store this site reads
 - [cairn-esp32-device-firmware](https://github.com/ParkWardRR/cairn-esp32-device-firmware): the dongle firmware
-- [cairn-ios-companion-app](https://github.com/ParkWardRR/cairn-ios-companion-app): the iPhone app
+- [cairn-ios-companion-app](https://github.com/ParkWardRR/cairn-ios-companion-app): the iPhone app, which signs in here with the same passkeys
+- [cairn-modules](https://github.com/ParkWardRR/cairn-modules): the modules whose labels, units and thresholds these pages will read instead of hard-coding them
 
 History before the split is preserved here; see [MIGRATION.md](MIGRATION.md). The legacy monorepo is archived as
 [cairn-original-monorepo-archive](https://github.com/ParkWardRR/cairn-original-monorepo-archive).
@@ -634,25 +708,3 @@ History before the split is preserved here; see [MIGRATION.md](MIGRATION.md). Th
 ## License
 
 Blue Oak Model License 1.0.0, see [LICENSE](LICENSE).
-
-## Two GPS tracks per trip
-
-The dongle records its own GNSS fixes, and the phone's GPS when the Cairn app is connected (the app hands its fixes to
-the dongle over Bluetooth; the store marks them with bit 5 of `source_flags`). A trip with both shows a **GPS** toggle
-above the map: *Combined* (the default), *Device*, *Phone*, or *Both lines*.
-
-- **Combined** is one point per second. Where both receivers have a fix in that second the two positions are averaged
-  with weights of 1 / accuracy², so the better receiver counts for more; elsewhere it is whichever one had a fix. A
-  receiver's own jumps (an implied speed over 200 km/h) are dropped first. A trip with one source shows that source's
-  fixes unchanged.
-- **GPS: device and phone** (under the map, `GET /api/trips/<id>/gps-compare`) lists each source's fixes, update rate,
-  time with a fix, gaps, stated accuracy, distance, and speed and distance against the car's own OBD speed, then how
-  the two differed: typical, 95th-percentile and largest gap in metres, the share within 5 m and 10 m, which way the
-  phone sat relative to the device, and a chart over the trip.
-- Position has no ground truth, so each receiver's accuracy is what it states (the dongle's from HDOP × 4 m when it
-  states none, and the page says so), and the disagreement between the two is the measure. Speed and distance are
-  checked against OBD, which is ground truth for those.
-- Each device fix is compared with the phone's position *at the same instant*, interpolated between the phone's two
-  nearest fixes; otherwise the delay the phone's fixes pick up crossing Bluetooth would show up as GPS error.
-- Everything else on the trip page (distance, stops, elevation, fuel) reads a single track: the device's, or the
-  phone's when the dongle never had a fix (`primaryPositions` in `server/utils/sql.ts`), so a road is never driven twice.
