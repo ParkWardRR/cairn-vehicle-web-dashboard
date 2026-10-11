@@ -36,3 +36,8 @@ logs
 
 # Staged acceptance: the pinned server checkout and the demo store binary
 /.staging/
+
+# Playwright (live UI suite)
+test-results
+playwright-report
+tests/live/.report.json

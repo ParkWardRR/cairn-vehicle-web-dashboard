@@ -9,6 +9,7 @@
     "preview": "nuxt preview",
     "test": "vitest run",
     "test:acceptance": "vitest run --config vitest.acceptance.config.ts",
+    "test:live": "playwright test",
     "postinstall": "nuxt prepare"
   },
   "dependencies": {
