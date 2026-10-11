@@ -48,9 +48,11 @@ assertions, not skips, so they turn green when the bug is fixed.
 
 | Test | Issue |
 | --- | --- |
-| `Statistics (/stats) renders`, `Driving style (/behavior) renders` + the `/stats` interactions | #18 hydration mismatch |
-| `a trip the store does not have is refused` | #19 unknown trip id spins for ever |
-| `a trip page and the trip list date a drive the same way`, `a trip start date is a real date` | #20 one broken timestamp, three different renderings |
-| `a drive falls on the day the trip list says it does` | #21 Statistics buckets by UTC day |
-| `the pages agree on how many trips there are` | #22 Places and Phones count trips the owner cannot open |
-| `the theme switch holds across a reload`, `the sidebar collapses and stays collapsed` | #23 no preference is ever persisted |
+| `a trip the store does not have is refused` | #21 unknown trip id spins for ever |
+| `a trip page and the trip list date a drive the same way`, `a trip start date is a real date` | #22 one broken timestamp, three different renderings |
+| `a drive falls on the day the trip list says it does` | #23 Statistics buckets by UTC day |
+| `the pages agree on how many trips there are` | #24 four pages, four trip counts |
+| `the theme switch holds across a reload`, `the sidebar collapses and stays collapsed` | #25 no preference is ever persisted |
+| `Statistics (/stats) renders`, `Driving style (/behavior) renders`, and the three `/stats` interactions | #26 hydration mismatch |
+
+Twelve failures, six bugs. Everything else passes.
