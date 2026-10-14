@@ -10,7 +10,7 @@ const MAX_POINTS = 3000
 
 export default defineEventHandler(async (event) => {
   const tripId = getRouterParam(event, 'tripId') ?? ''
-  if (!/^[0-9a-f]{32}$/.test(bootId)) throw createError({ statusCode: 400, statusMessage: 'boot id must be 32 hex characters' })
+  if (!tripId) throw createError({ statusCode: 400, statusMessage: 'tripId required' })
   const trip = await resolveTrip(tripId)
 
   const raw = await queryTsdbObjects(`
@@ -28,7 +28,7 @@ export default defineEventHandler(async (event) => {
   const trim = clampTrim(getQuery(event).trim)
   const r = redactRoute(points, zones, trim)
 
-  const summary = await queryTsdbObjects(`SELECT duration_s, max_speed_kph FROM v_drive_summary WHERE ${trip.where()} LIMIT 1`)
+  const summary = await queryTsdbObjects(`SELECT coalesce(driving_ms, duration_ms) / 1000.0 AS duration_s, max_obd_speed_kph AS max_speed_kph FROM v_trip_summary WHERE trip_id = ${sqlString(trip.tripId)}`)
   const day = String(fixed[0].observed_at ?? '').slice(0, 10)
   return {
     // each piece thinned to keep the payload small; the shape survives

@@ -14,7 +14,7 @@ export default defineEventHandler(async (event) => {
       SELECT o.speed_kph, b.maf_cgps, b.lambda_ratio, b.mono_ms
       FROM boost b
       ASOF JOIN obd o ON b.vehicle_id = o.vehicle_id AND b.boot_id = o.boot_id AND b.mono_ms >= o.mono_ms
-      WHERE b.${trip.where()}
+      WHERE ${trip.where('b')}
         AND b.maf_cgps IS NOT NULL AND b.lambda_ratio IS NOT NULL
         AND b.lambda_ratio > 0.7 AND b.lambda_ratio < 1.3
         AND o.speed_kph IS NOT NULL
@@ -29,7 +29,7 @@ export default defineEventHandler(async (event) => {
         FROM ${tripPositions(trip)} WHERE ${trip.where()} AND speed_mps IS NOT NULL
       ) WHERE lead_ms IS NOT NULL
     `),
-    queryTsdbObjects(`SELECT duration_s FROM v_drive_summary WHERE ${trip.where()}`),
+    queryTsdbObjects(`SELECT coalesce(driving_ms, duration_ms) / 1000.0 AS duration_s FROM v_trip_summary WHERE trip_id = ${sqlString(trip.tripId)}`),
   ])
 
   return {

@@ -40,7 +40,7 @@ export default defineEventHandler(async (event) => {
   const combined = both ? combineGps(device, phone) : (device.length ? device : phone)
 
   const gaps = await queryTsdbObjects(`
-    SELECT * FROM gap WHERE ${trip.where()} ORDER BY seq ASC
+    SELECT * FROM gap WHERE vehicle_id = ${trip.vehicleSql} AND started_at BETWEEN ${trip.startSql} AND ${trip.endSql} ORDER BY seq ASC
   `)
 
   const features: any[] = []
