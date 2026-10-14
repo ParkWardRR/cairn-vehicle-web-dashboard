@@ -9,13 +9,13 @@ import { clampTrim, redactRoute, thin, zonesFrom } from '../../../../shared/util
 const MAX_POINTS = 3000
 
 export default defineEventHandler(async (event) => {
-  const bootId = getRouterParam(event, 'bootId') ?? ''
+  const tripId = getRouterParam(event, 'tripId') ?? ''
   if (!/^[0-9a-f]{32}$/.test(bootId)) throw createError({ statusCode: 400, statusMessage: 'boot id must be 32 hex characters' })
-  const id = sqlString(bootId)
+  const trip = await resolveTrip(tripId)
 
   const raw = await queryTsdbObjects(`
-    SELECT lat, lon, speed_mps, mono_ms, observed_at FROM ${primaryPositions(id)}
-    WHERE boot_id = ${id} AND lat != 0 AND lon != 0 ORDER BY mono_ms ASC
+    SELECT lat, lon, speed_mps, mono_ms, observed_at FROM ${tripPositions(trip)}
+    WHERE ${trip.where()} AND lat != 0 AND lon != 0 ORDER BY observed_at, mono_ms ASC
   `)
   if (!raw.length) throw createError({ statusCode: 404, statusMessage: 'Trip not found' })
 
@@ -28,7 +28,7 @@ export default defineEventHandler(async (event) => {
   const trim = clampTrim(getQuery(event).trim)
   const r = redactRoute(points, zones, trim)
 
-  const summary = await queryTsdbObjects(`SELECT duration_s, max_speed_kph FROM v_drive_summary WHERE boot_id = ${id} LIMIT 1`)
+  const summary = await queryTsdbObjects(`SELECT duration_s, max_speed_kph FROM v_drive_summary WHERE ${trip.where()} LIMIT 1`)
   const day = String(fixed[0].observed_at ?? '').slice(0, 10)
   return {
     // each piece thinned to keep the payload small; the shape survives

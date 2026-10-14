@@ -6,10 +6,10 @@ import type { GpsComparison } from '#shared/utils/gpsSources'
 // How the dongle's GNSS and the phone's GPS differed on one trip, and how close each came to the
 // car's own speed. Position has no ground truth, so the disagreement between the two is the honest
 // measure of it; speed and distance are checked against OBD.
-const props = defineProps<{ bootId: string }>()
+const props = defineProps<{ tripId: string }>()
 
-const { data: c, status } = useFetch<GpsComparison>(() => `/api/trips/${props.bootId}/gps-compare`, {
-  key: () => `gps-compare-${props.bootId}`,
+const { data: c, status } = useFetch<GpsComparison>(() => `/api/trips/${props.tripId}/gps-compare`, {
+  key: () => `gps-compare-${props.tripId}`,
 })
 
 const hasDevice = computed(() => !!c.value?.device)

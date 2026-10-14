@@ -34,7 +34,7 @@ interface ScrubStop {
 }
 
 const props = defineProps<{
-  bootId: string
+  tripId: string
   stops?: ScrubStop[]
   selectedStop?: number | null
   // The playhead, in the trip's monotonic milliseconds.
@@ -53,7 +53,7 @@ const emit = defineEmits<{
 }>()
 
 const { data: timeline } = useFetch<{ obd: OBDSample[]; boost: BoostSample[]; gps: GPSSample[] }>(
-  () => `/api/trips/${props.bootId}/timeline`,
+  () => `/api/trips/${props.tripId}/timeline`,
 )
 
 const obd = computed(() => timeline.value?.obd ?? [])

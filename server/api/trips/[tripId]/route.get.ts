@@ -20,15 +20,15 @@ function lineFeature(rows: any[], track: 'combined' | 'device' | 'phone', extra:
 }
 
 export default defineEventHandler(async (event) => {
-  const bootId = getRouterParam(event, 'bootId')
-  if (!bootId) throw createError({ statusCode: 400, statusMessage: 'bootId required' })
-  const id = sqlString(bootId)
+  const tripId = getRouterParam(event, 'tripId')
+  if (!tripId) throw createError({ statusCode: 400, statusMessage: 'tripId required' })
+  const trip = await resolveTrip(tripId)
 
   const raw = await queryTsdbObjects(`
     SELECT ${COLUMNS}
     FROM position
-    WHERE boot_id = ${id} AND lat != 0 AND lon != 0
-    ORDER BY mono_ms ASC
+    WHERE ${trip.where()} AND lat != 0 AND lon != 0
+    ORDER BY observed_at, mono_ms ASC
   `)
 
   const { device: deviceRaw, phone: phoneRaw } = splitGpsSources(raw as GpsPositionRow[])
@@ -40,7 +40,7 @@ export default defineEventHandler(async (event) => {
   const combined = both ? combineGps(device, phone) : (device.length ? device : phone)
 
   const gaps = await queryTsdbObjects(`
-    SELECT * FROM gap WHERE boot_id = ${id} ORDER BY seq ASC
+    SELECT * FROM gap WHERE ${trip.where()} ORDER BY seq ASC
   `)
 
   const features: any[] = []

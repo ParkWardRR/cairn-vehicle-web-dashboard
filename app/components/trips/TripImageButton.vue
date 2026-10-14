@@ -3,7 +3,7 @@ import { canvasToPng, drawTripImage, type ImageData } from '~/composables/useTri
 
 // Saves a high-resolution picture of the route. Drawn here, with no map tiles, and without the
 // trip's start and end or anything near a private place you have saved.
-const props = defineProps<{ bootId: string }>()
+const props = defineProps<{ tripId: string }>()
 const scale = ref(2)
 const busy = ref(false)
 const error = ref('')
@@ -14,7 +14,7 @@ async function save() {
   error.value = ''
   note.value = ''
   try {
-    const d = await $fetch<ImageData>(`/api/trips/${props.bootId}/image-data`)
+    const d = await $fetch<ImageData>(`/api/trips/${props.tripId}/image-data`)
     if (!d.segments.length) {
       note.value = 'This trip is too short to draw without showing where it started and ended.'
       return

@@ -112,10 +112,10 @@ function formatDuration(seconds: number | null): string {
         <tbody>
           <tr
             v-for="trip in trips"
-            :key="trip.boot_id"
+            :key="trip.trip_id"
             class="group cursor-pointer transition-colors hover:bg-[var(--color-surface-elevated)]"
             :style="{ borderBottom: '1px solid var(--color-border)' }"
-            @click="navigateTo(`/trips/${trip.boot_id}`)"
+            @click="navigateTo(`/trips/${trip.trip_id}`)"
           >
             <td class="px-5 py-3.5 text-[13px]">
               <span v-if="trip.annotation?.bookmarked" class="mr-1" style="color: var(--color-accent)" title="Bookmarked">★</span>{{ formatDate(trip.start_time) }}

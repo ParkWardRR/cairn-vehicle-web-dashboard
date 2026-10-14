@@ -16,10 +16,10 @@ export const useTripsStore = defineStore('trips', () => {
     }
   }
 
-  async function fetchTrip(bootId: string) {
+  async function fetchTrip(tripId: string) {
     loading.value = true
     try {
-      currentTrip.value = await $fetch(`/api/trips/${bootId}`)
+      currentTrip.value = await $fetch(`/api/trips/${tripId}`)
     } finally {
       loading.value = false
     }

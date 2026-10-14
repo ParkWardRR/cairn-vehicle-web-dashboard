@@ -1,6 +1,6 @@
 // Draws a trip's route to a PNG in the browser. No map tiles are fetched, so nothing about the
 // trip leaves this device. The data it draws from is already redacted by the server
-// (/api/trips/:bootId/image-data): privacy zones removed, the true start and end never included.
+// (/api/trips/:tripId/image-data): privacy zones removed, the true start and end never included.
 
 interface Seg { lat: number; lon: number; speed_kph: number | null }
 export interface ImageData {

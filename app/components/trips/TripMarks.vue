@@ -1,9 +1,9 @@
 <script setup lang="ts">
 // Bookmark, tags and a note on one trip, saved as you go. Stored on this server, with the places.
-const props = defineProps<{ bootId: string }>()
+const props = defineProps<{ tripId: string }>()
 
 interface Mark { bookmarked: boolean; note: string | null; tags: string[] }
-const { data, refresh } = await useFetch<{ annotation: Mark }>(() => `/api/annotations/${props.bootId}`)
+const { data, refresh } = await useFetch<{ annotation: Mark }>(() => `/api/annotations/${props.tripId}`)
 const mark = computed<Mark>(() => data.value?.annotation ?? { bookmarked: false, note: null, tags: [] })
 
 const newTag = ref('')
@@ -16,7 +16,7 @@ async function save(patch: Partial<Mark>) {
   saving.value = true
   error.value = ''
   try {
-    await $fetch(`/api/annotations/${props.bootId}`, { method: 'PUT', body: patch })
+    await $fetch(`/api/annotations/${props.tripId}`, { method: 'PUT', body: patch })
     await refresh()
   } catch (e: any) {
     error.value = e?.data?.statusMessage ?? 'Could not save.'

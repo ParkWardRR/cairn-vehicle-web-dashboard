@@ -13,12 +13,12 @@ interface GPSSample {
 }
 
 const props = defineProps<{
-  bootId: string
+  tripId: string
   firstObdMs?: number | null
 }>()
 
 const { data: timeline } = useFetch<{ gps: GPSSample[] }>(
-  () => `/api/trips/${props.bootId}/timeline`,
+  () => `/api/trips/${props.tripId}/timeline`,
 )
 
 const gps = computed(() => timeline.value?.gps ?? [])

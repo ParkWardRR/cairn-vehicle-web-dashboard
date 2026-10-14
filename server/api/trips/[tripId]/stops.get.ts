@@ -1,13 +1,13 @@
 export default defineEventHandler(async (event) => {
-  const bootId = getRouterParam(event, 'bootId')
-  if (!bootId) throw createError({ statusCode: 400, statusMessage: 'bootId required' })
-  const id = sqlString(bootId)
+  const tripId = getRouterParam(event, 'tripId')
+  if (!tripId) throw createError({ statusCode: 400, statusMessage: 'tripId required' })
+  const trip = await resolveTrip(tripId)
 
   const fixes = await queryTsdbObjects(`
     SELECT lat, lon, speed_mps, mono_ms, observed_at
-    FROM ${primaryPositions(id)}
-    WHERE boot_id = ${id} AND lat != 0 AND lon != 0
-    ORDER BY mono_ms ASC
+    FROM ${tripPositions(trip)}
+    WHERE ${trip.where()} AND lat != 0 AND lon != 0
+    ORDER BY observed_at, mono_ms ASC
   `)
 
   const stops = detectStops(fixes as StopFix[])

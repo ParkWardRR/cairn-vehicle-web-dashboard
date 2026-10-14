@@ -14,11 +14,15 @@ interface RouteData {
 interface TripSummary {
   boot_id: string
   duration_s: number
-  max_speed_kph: number
+  duration_ms: number | null
+  driving_ms: number | null
+  max_speed_kph: number | null
+  max_obd_speed_kph: number | null
   max_rpm: number
   obd_samples: number
   gnss_samples: number
   gap_count: number
+  distance_m: number | null
   start: { observed_at: string; lat: number; lon: number; place?: StopPlace | null } | null
   end: { observed_at: string; lat: number; lon: number; place?: StopPlace | null } | null
   places_pending?: boolean
@@ -37,16 +41,17 @@ interface Insight {
   unit?: string
   detail?: string
   icon?: string
+  category: 'drive' | 'performance' | 'quality'
 }
 
 const route = useRoute()
-const bootId = computed(() => route.params.bootId as string)
+const tripId = computed(() => route.params.tripId as string)
 
 const { data: trip, status: tripStatus, refresh: refreshTrip } = useFetch<TripSummary>(
-  () => `/api/trips/${bootId.value}`,
+  () => `/api/trips/${tripId.value}`,
 )
 const { data: routeData } = useFetch<RouteData>(
-  () => `/api/trips/${bootId.value}/route`,
+  () => `/api/trips/${tripId.value}/route`,
 )
 interface StopPlace {
   kind?: string
@@ -72,7 +77,7 @@ interface TripStop {
 }
 
 const { data: stopsData, refresh: refreshStops } = useFetch<{ stops: TripStop[]; pending: boolean; attribution: string[] }>(
-  () => `/api/trips/${bootId.value}/stops`,
+  () => `/api/trips/${tripId.value}/stops`,
 )
 
 // Place names are looked up in the background the first time a trip is opened;
@@ -105,7 +110,7 @@ function onStopClick(i: number) {
 
 interface FuelSample { speed_kph: number; maf_cgps: number; lambda_ratio: number }
 const { data: fuelData } = useFetch<{ samples: FuelSample[]; distance_m: number; duration_s: number | null }>(
-  () => `/api/trips/${bootId.value}/fuel`,
+  () => `/api/trips/${tripId.value}/fuel`,
 )
 
 const blend = ref(DEFAULT_ETHANOL_BLEND)
@@ -154,7 +159,7 @@ function fmtClock(s: TripStop): string {
 }
 
 const { data: insightsData } = useFetch<{ insights: Insight[] }>(
-  () => `/api/trips/${bootId.value}/insights`,
+  () => `/api/trips/${tripId.value}/insights`,
 )
 
 // Which GPS the map and the charts show: both receivers combined (the default), the dongle's
@@ -248,6 +253,47 @@ const gpsAcq = computed(() => {
 
 const insights = computed(() => insightsData.value?.insights ?? [])
 
+const insightCategories = computed(() => {
+  const cats = [
+    { key: 'drive' as const, label: 'Drive' },
+    { key: 'performance' as const, label: 'Performance' },
+    { key: 'quality' as const, label: 'Data Quality' },
+  ]
+  return cats
+    .map(c => ({ ...c, items: insights.value.filter(i => i.category === c.key) }))
+    .filter(c => c.items.length > 0)
+})
+
+const tripTimes = computed(() => {
+  if (!trip.value) return null
+  const totalMs = trip.value.duration_ms
+  const drivingMs = trip.value.driving_ms
+  if (totalMs == null || totalMs <= 0) return null
+  const stoppedMs = drivingMs != null ? Math.max(0, totalMs - drivingMs) : null
+  return { totalMs, drivingMs, stoppedMs }
+})
+
+function formatDurationMs(ms: number | null | undefined): string {
+  if (ms == null || ms <= 0) return '--'
+  const s = Math.floor(ms / 1000)
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  if (h > 0) return `${h}h ${m}m`
+  return `${m}m ${s % 60}s`
+}
+
+const maxSpeedMph = computed(() => {
+  const kph = trip.value?.max_obd_speed_kph ?? trip.value?.max_speed_kph
+  if (kph == null || kph <= 0) return null
+  return Math.round(kph / 1.60934)
+})
+
+const tripDistance = computed(() => {
+  const d = trip.value?.distance_m
+  if (d == null || d <= 0) return null
+  return (d / 1609.344).toFixed(1)
+})
+
 // The scrubber under the map. The playhead is the trip time being shown; hovering
 // the track previews a point without moving it.
 const playhead = ref<number | null>(null)
@@ -318,7 +364,7 @@ function insightIcon(icon: string | undefined): string {
     <!-- Header -->
     <LayoutPageHeader title="Trip" :subtitle="trip ? formatDate(trip.start?.observed_at) : 'Loading this drive…'">
       <template #actions>
-        <TripsTripImageButton :boot-id="bootId" />
+        <TripsTripImageButton :boot-id="tripId" />
         <NuxtLink
           to="/trips"
           class="inline-flex items-center gap-2 px-3.5 py-2 text-[13px] font-medium rounded-xl transition-colors hover:bg-[var(--color-surface-elevated)]"
@@ -338,15 +384,16 @@ function insightIcon(icon: string | undefined): string {
     </div>
 
     <template v-else-if="trip">
-      <!-- Stat bar -->
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-        <DataStatCard label="Duration" :value="formatDuration(trip.duration_s)" />
-        <DataStatCard label="Max Speed" :value="`${Math.round(trip.max_speed_kph / 1.60934)}`" subtitle="mph" />
-        <DataStatCard label="Max RPM" :value="`${trip.max_rpm?.toLocaleString()}`" :color="trip.max_rpm >= 6000 ? 'warning' : 'default'" />
-        <DataStatCard label="OBD Samples" :value="`${trip.obd_samples?.toLocaleString()}`" />
+      <!-- Time breakdown -->
+      <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
+        <DataStatCard label="Driving" :value="formatDurationMs(tripTimes?.drivingMs)" />
+        <DataStatCard label="Stopped" :value="formatDurationMs(tripTimes?.stoppedMs)" />
+        <DataStatCard label="Total" :value="formatDurationMs(tripTimes?.totalMs)" />
+        <DataStatCard label="Distance" :value="tripDistance ?? '--'" subtitle="mi" />
+        <DataStatCard label="Max Speed" :value="maxSpeedMph != null ? `${maxSpeedMph}` : '--'" subtitle="mph" />
       </div>
 
-      <TripsTripMarks :boot-id="bootId" />
+      <TripsTripMarks :boot-id="tripId" />
 
       <!-- Fuel economy -->
       <div v-if="fuel" class="mb-6">
@@ -428,7 +475,7 @@ function insightIcon(icon: string | undefined): string {
           <ChartsTripScrubber
             v-if="hasValidRoute"
             v-model="playhead"
-            :boot-id="bootId"
+            :boot-id="tripId"
             :stops="stops"
             :selected-stop="selectedStop"
             :wall-base-ms="wallBaseMs"
@@ -523,14 +570,14 @@ function insightIcon(icon: string | undefined): string {
       <!-- Interactive timeline + GPS health -->
       <div class="mb-4">
         <ClientOnly>
-          <ChartsTripTimeline :boot-id="bootId" :first-obd-ms="trip?.first_obd_ms" />
+          <ChartsTripTimeline :boot-id="tripId" :first-obd-ms="trip?.first_obd_ms" />
           <template #fallback>
             <div class="skeleton rounded-xl" style="height: 180px" />
           </template>
         </ClientOnly>
       </div>
 
-      <TripsGpsCompare :boot-id="bootId" />
+      <TripsGpsCompare :boot-id="tripId" />
 
       <!-- Speed / Elevation sparkline -->
       <div class="rounded-xl p-4 mb-6" :style="{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }">
@@ -544,29 +591,31 @@ function insightIcon(icon: string | undefined): string {
         <ChartsTripSparkline :coordinates="coordinates" :speeds="speeds" />
       </div>
 
-      <!-- Insights grid -->
-      <div v-if="insights.length" class="mb-6">
-        <h2 class="text-[11px] font-bold uppercase tracking-wider mb-3" style="color: var(--color-text-secondary)">Trip Insights</h2>
-        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-          <div
-            v-for="(insight, i) in insights"
-            :key="i"
-            class="rounded-xl p-4 transition-all duration-150 hover:-translate-y-0.5"
-            :style="{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }"
-          >
-            <div class="flex items-start gap-3">
-              <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5" style="background: var(--color-accent-soft)">
-                <svg class="w-4 h-4" style="color: var(--color-accent)" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
-                  <path stroke-linecap="round" stroke-linejoin="round" :d="insightIcon(insight.icon)" />
-                </svg>
-              </div>
-              <div class="min-w-0">
-                <p class="text-[11px] font-semibold uppercase tracking-wider" style="color: var(--color-text-secondary)">{{ insight.label }}</p>
-                <p class="text-lg font-bold font-mono mt-0.5 tracking-tight">
-                  {{ insight.value }}
-                  <span v-if="insight.unit" class="text-xs font-normal" style="color: var(--color-text-secondary)">{{ insight.unit }}</span>
-                </p>
-                <p v-if="insight.detail" class="text-[11px] mt-0.5" style="color: var(--color-text-secondary)">{{ insight.detail }}</p>
+      <!-- Insights by category -->
+      <div v-if="insightCategories.length" class="mb-6 space-y-5">
+        <div v-for="cat in insightCategories" :key="cat.key">
+          <h2 class="text-[11px] font-bold uppercase tracking-wider mb-3" style="color: var(--color-text-secondary)">{{ cat.label }}</h2>
+          <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            <div
+              v-for="(insight, i) in cat.items"
+              :key="i"
+              class="rounded-xl p-4 transition-all duration-150 hover:-translate-y-0.5"
+              :style="{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }"
+            >
+              <div class="flex items-start gap-3">
+                <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5" style="background: var(--color-accent-soft)">
+                  <svg class="w-4 h-4" style="color: var(--color-accent)" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75">
+                    <path stroke-linecap="round" stroke-linejoin="round" :d="insightIcon(insight.icon)" />
+                  </svg>
+                </div>
+                <div class="min-w-0">
+                  <p class="text-[11px] font-semibold uppercase tracking-wider" style="color: var(--color-text-secondary)">{{ insight.label }}</p>
+                  <p class="text-lg font-bold font-mono mt-0.5 tracking-tight">
+                    {{ insight.value }}
+                    <span v-if="insight.unit" class="text-xs font-normal" style="color: var(--color-text-secondary)">{{ insight.unit }}</span>
+                  </p>
+                  <p v-if="insight.detail" class="text-[11px] mt-0.5" style="color: var(--color-text-secondary)">{{ insight.detail }}</p>
+                </div>
               </div>
             </div>
           </div>
@@ -576,7 +625,7 @@ function insightIcon(icon: string | undefined): string {
       <!-- Trip metadata footer -->
       <div class="rounded-xl p-4" :style="{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }">
         <div class="flex flex-wrap gap-x-8 gap-y-2 text-[11px]" style="color: var(--color-text-secondary)">
-          <span><span class="font-semibold">Boot ID:</span> <span class="font-mono">{{ bootId }}</span></span>
+          <span><span class="font-semibold">Boot ID:</span> <span class="font-mono">{{ tripId }}</span></span>
           <span v-if="trip.gnss_samples"><span class="font-semibold">GNSS:</span> {{ trip.gnss_samples }} fixes</span>
           <span v-if="trip.gap_count"><span class="font-semibold">Gaps:</span> {{ trip.gap_count }}</span>
           <span v-if="trip.harsh_event_count"><span class="font-semibold">Harsh events:</span> {{ trip.harsh_event_count }}</span>
