@@ -16,8 +16,8 @@
 # CAIRN_TOKEN) and is sent as a bearer header through curl's config input, so it never appears in
 # a process listing.
 #
-# Exit 0 only if every route answered 2xx. Routes with a parameter other than :bootId
-# are skipped (they need a place id the caller owns); POST/PATCH/DELETE are not walked.
+# Exit 0 only if every route answered 2xx. Routes with a parameter other than :tripId
+# or :bootId are skipped (they need a place id the caller owns); POST/PATCH/DELETE are not walked.
 set -euo pipefail
 
 EMPTY=0; DETECT=0
@@ -34,14 +34,17 @@ TOKEN="${CAIRN_TOKEN:-}"
 # curl, with the credential when there is one
 c() { if [ -n "$TOKEN" ]; then printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" | curl -K - "$@"; else curl "$@"; fi; }
 
-boot="$(c -fsS "$BASE/api/trips" | sed -n 's/.*"boot_id": *"\([0-9a-f]*\)".*/\1/p' | head -1)"
-[ -n "$boot" ] || echo "note: /api/trips lists no trip, so the :bootId routes are skipped" >&2
-if [ "$DETECT" = 1 ] && [ -z "$boot" ]; then EMPTY=1; echo "note: walking as an empty store" >&2; fi
+trips_json="$(c -fsS "$BASE/api/trips")"
+trip="$(echo "$trips_json" | sed -n 's/.*"trip_id": *"\([^"]*\)".*/\1/p' | head -1)"
+boot="$(echo "$trips_json" | sed -n 's/.*"boot_id": *"\([0-9a-f]*\)".*/\1/p' | head -1)"
+[ -n "$trip" ] || echo "note: /api/trips lists no trip, so the :tripId/:bootId routes are skipped" >&2
+if [ "$DETECT" = 1 ] && [ -z "$trip" ]; then EMPTY=1; echo "note: walking as an empty store" >&2; fi
 
 ok=0; bad=0; skipped=0
 while read -r method path; do
   [ "$method" = GET ] || continue
   case "$path" in
+    *:tripId*) [ -n "$trip" ] || { skipped=$((skipped+1)); continue; }; path="${path//:tripId/$trip}" ;;
     *:bootId*) [ -n "$boot" ] || { skipped=$((skipped+1)); continue; }; path="${path//:bootId/$boot}" ;;
     *:*) skipped=$((skipped+1)); continue ;;
   esac
