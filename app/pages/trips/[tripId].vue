@@ -267,9 +267,9 @@ const insightCategories = computed(() => {
 const tripTimes = computed(() => {
   if (!trip.value) return null
   const totalMs = trip.value.duration_ms
-  const drivingMs = trip.value.driving_ms
   if (totalMs == null || totalMs <= 0) return null
-  const stoppedMs = drivingMs != null ? Math.max(0, totalMs - drivingMs) : null
+  const drivingMs = trip.value.driving_ms ?? totalMs
+  const stoppedMs = Math.max(0, totalMs - drivingMs)
   return { totalMs, drivingMs, stoppedMs }
 })
 
