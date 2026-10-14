@@ -37,12 +37,20 @@ export interface TripScope {
  */
 export async function resolveTrip(tripId: string): Promise<TripScope> {
   const idSql = sqlString(tripId)
-  const rows = await queryTsdbObjects(`
+  let rows = await queryTsdbObjects(`
     SELECT trip_id, vehicle_id,
            strftime(started_at, '%Y-%m-%d %H:%M:%S.%g') AS started_at,
            strftime(ended_at, '%Y-%m-%d %H:%M:%S.%g') AS ended_at
     FROM v_trip_summary WHERE trip_id = ${idSql}
   `)
+  if (!rows.length && /^[0-9a-f]{32}$/.test(tripId)) {
+    rows = await queryTsdbObjects(`
+      SELECT trip_id, vehicle_id,
+             strftime(started_at, '%Y-%m-%d %H:%M:%S.%g') AS started_at,
+             strftime(ended_at, '%Y-%m-%d %H:%M:%S.%g') AS ended_at
+      FROM v_trip_summary WHERE boot_id = ${idSql}
+    `)
+  }
   if (!rows.length) {
     throw createError({ statusCode: 404, statusMessage: 'Trip not found' })
   }
