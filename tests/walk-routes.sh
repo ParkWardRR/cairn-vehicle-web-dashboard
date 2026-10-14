@@ -35,8 +35,8 @@ TOKEN="${CAIRN_TOKEN:-}"
 c() { if [ -n "$TOKEN" ]; then printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" | curl -K - "$@"; else curl "$@"; fi; }
 
 trips_json="$(c -fsS "$BASE/api/trips")"
-trip="$(echo "$trips_json" | sed -n 's/.*"trip_id": *"\([^"]*\)".*/\1/p' | head -1)"
-boot="$(echo "$trips_json" | sed -n 's/.*"boot_id": *"\([0-9a-f]*\)".*/\1/p' | head -1)"
+trip="$(echo "$trips_json" | grep -o '"trip_id": *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"/\1/')"
+boot="$(echo "$trips_json" | grep -o '"boot_id": *"[0-9a-f]*"' | head -1 | sed 's/.*"\([^"]*\)"/\1/')"
 [ -n "$trip" ] || echo "note: /api/trips lists no trip, so the :tripId/:bootId routes are skipped" >&2
 if [ "$DETECT" = 1 ] && [ -z "$trip" ]; then EMPTY=1; echo "note: walking as an empty store" >&2; fi
 
