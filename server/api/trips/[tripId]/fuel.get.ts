@@ -21,13 +21,15 @@ export default defineEventHandler(async (event) => {
       ORDER BY b.mono_ms
     `),
     // Each step is capped: the device logs sparsely while parked, so a long
-    // silence between two fixes must not be counted as driving at the last speed.
+    // silence between two fixes must not be counted as driving at the last speed. Steps are
+    // measured on observed_at, not mono_ms: a trip can span boots, the monotonic clock
+    // restarts at each, and UINT32 subtraction across the restart overflows and fails the call.
     queryTsdbObjects(`
-      SELECT coalesce(sum(speed_mps * least(lead_ms - mono_ms, 10000) / 1000.0), 0) AS distance_m
+      SELECT coalesce(sum(speed_mps * least(greatest(epoch_ms(lead_at) - epoch_ms(observed_at), 0), 10000) / 1000.0), 0) AS distance_m
       FROM (
-        SELECT mono_ms, speed_mps, lead(mono_ms) OVER (ORDER BY observed_at, mono_ms) AS lead_ms
+        SELECT observed_at, speed_mps, lead(observed_at) OVER (ORDER BY observed_at, mono_ms) AS lead_at
         FROM ${tripPositions(trip)} WHERE ${trip.where()} AND speed_mps IS NOT NULL
-      ) WHERE lead_ms IS NOT NULL
+      ) WHERE lead_at IS NOT NULL
     `),
     queryTsdbObjects(`SELECT coalesce(driving_ms, duration_ms) / 1000.0 AS duration_s FROM v_trip_summary WHERE trip_id = ${sqlString(trip.tripId)}`),
   ])

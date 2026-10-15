@@ -193,3 +193,11 @@ describe('gpsPercentile', () => {
     expect(gpsPercentile([NaN, 5], 0.5)).toBe(5)
   })
 })
+
+describe('splitGpsSources across boots', () => {
+  it('orders a trip\'s fixes by wall clock, not by the monotonic clock that restarts at each boot', () => {
+    const row = (mono_ms: number, observed_at: string) => ({ mono_ms, observed_at, lat: 34, lon: -118, fix_type: 3, sats_used: 8, source_flags: 0 }) as any
+    const rows = [row(900_000, '2026-10-15T02:00:00Z'), row(901_000, '2026-10-15T02:00:01Z'), row(1_000, '2026-10-15T02:30:00Z'), row(2_000, '2026-10-15T02:30:01Z')]
+    expect(splitGpsSources(rows).device.map(r => r.observed_at)).toEqual(rows.map(r => r.observed_at))
+  })
+})

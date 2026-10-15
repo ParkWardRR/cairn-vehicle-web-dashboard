@@ -83,11 +83,14 @@ SQL_LOG="$RUN/sql.log"
 SERVICE_TOKEN="$(openssl rand -hex 24)"
 BOOTSTRAP_CODE="$(openssl rand -hex 8)"
 FAKE_TAILSCALE="$RUN/ts.sock"
+# Only the data instance is given a passphrase, so the suite sees both "configured" and "not".
+PASSPHRASE="staged-$(openssl rand -hex 8)"
 web() { # port store-port places-dir
   CAIRN_SQL_LOG="$([ "$CAPTURE" = 1 ] && [ "$1" = "$WEB_DATA" ] && echo "$SQL_LOG")" \
   NUXT_AUTH_SERVICE_TOKEN="$SERVICE_TOKEN" NUXT_AUTH_BOOTSTRAP_CODE="$BOOTSTRAP_CODE" \
   NUXT_AUTH_ORIGINS="http://127.0.0.1:$1" NUXT_AUTH_TAILNET_USERS="owner@example.test" \
   NUXT_AUTH_TAILSCALE_SOCKET="$FAKE_TAILSCALE" \
+  NUXT_AUTH_PASSPHRASE="$([ "$1" = "$WEB_DATA" ] && echo "$PASSPHRASE" || true)" \
   NUXT_AUTH_APPLE_APPS="$([ "$1" = "$WEB_DATA" ] && echo ABCDE12345.app.cairn.companion || true)" \
   NITRO_PORT="$1" NITRO_HOST=127.0.0.1 NUXT_TSDB_URL="http://127.0.0.1:$2" \
     NUXT_PLACES_EXTERNAL=false NUXT_PLACES_DATA_DIR="$3" \
@@ -121,6 +124,7 @@ CAIRN_WEB_EMPTY="http://127.0.0.1:$WEB_EMPTY" \
 CAIRN_WEB_DOWN="http://127.0.0.1:$WEB_DOWN" \
 CAIRN_WEB_PLACES="$RUN/places-data" \
 CAIRN_SERVICE_TOKEN="$SERVICE_TOKEN" CAIRN_BOOTSTRAP_CODE="$BOOTSTRAP_CODE" CAIRN_FAKE_TAILSCALE="$FAKE_TAILSCALE" \
+CAIRN_PASSPHRASE="$PASSPHRASE" \
   npm run test:acceptance
 rc=$?
 set -e

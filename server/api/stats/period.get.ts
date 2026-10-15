@@ -8,33 +8,22 @@ import { bucketStarts, parseDay, periodRange, PERIODS, type Bucket, type Period 
 //   /api/stats/period?period=month&date=2026-03-15        the month containing that day
 //   /api/stats/period?period=custom&from=2026-03-01&to=2026-03-10
 //
-// Computed from the store's per-trip summary and position tables, not from per-period store
-// views, so it works against any store that has them.
+// Computed from the store's per-trip summary (v_trip_summary), not from per-period store views,
+// so it works against any store that has it. Duration is the trip's wall-clock span, as the trip
+// list shows it, and distance is the summary's own.
 interface Totals { trips: number; duration_s: number; distance_m: number; max_speed_kph: number }
 
 const TRUNC: Record<Bucket, string> = { day: 'day', week: 'week', month: 'month' }
 
 async function rows(v: VehicleScope, from: string, to: string, bucket: Bucket) {
   return queryTsdbObjects(`
-    WITH starts AS (
-      SELECT vehicle_id, boot_id, min(observed_at) AS started FROM position${v.where()} GROUP BY vehicle_id, boot_id
-    ), dist AS (
-      SELECT vehicle_id, boot_id, sum(segment_m) AS dist_m FROM (
-        SELECT vehicle_id, boot_id,
-          speed_mps * least(lead(mono_ms) OVER (PARTITION BY vehicle_id, boot_id ORDER BY mono_ms) - mono_ms, 10000) / 1000.0 AS segment_m
-        FROM position
-        WHERE speed_mps IS NOT NULL${v.and()}
-      ) GROUP BY vehicle_id, boot_id
-    )
-    SELECT strftime(date_trunc('${TRUNC[bucket]}', s.started), '%Y-%m-%d') AS bucket,
+    SELECT strftime(date_trunc('${TRUNC[bucket]}', started_at), '%Y-%m-%d') AS bucket,
       count(*) AS trips,
-      coalesce(sum(d.duration_s), 0) AS duration_s,
-      coalesce(sum(dist.dist_m), 0) AS distance_m,
-      coalesce(max(d.max_speed_kph), 0) AS max_speed_kph
-    FROM v_drive_summary d
-    JOIN starts s USING (vehicle_id, boot_id)
-    LEFT JOIN dist USING (vehicle_id, boot_id)
-    WHERE s.started >= ${sqlString(from)}::TIMESTAMP AND s.started < ${sqlString(to)}::TIMESTAMP${v.and('d')}
+      coalesce(sum(duration_ms), 0) / 1000.0 AS duration_s,
+      coalesce(sum(distance_m), 0) AS distance_m,
+      coalesce(max(max_obd_speed_kph), 0) AS max_speed_kph
+    FROM v_trip_summary
+    WHERE started_at >= ${sqlString(from)}::TIMESTAMP AND started_at < ${sqlString(to)}::TIMESTAMP${v.and()}
     GROUP BY 1 ORDER BY 1
   `)
 }

@@ -53,6 +53,7 @@ function rssiStatus(dbm: number | null | undefined): { label: string; status: st
 const { data: stats, pending: statsPending } = useFetch('/api/dashboard/stats')
 const { data: recent, pending: recentPending } = useFetch<{
   trips: Array<{
+    trip_id: string
     boot_id: string
     duration_s: number
     max_speed_kph: number
@@ -176,7 +177,7 @@ const recentTrips = computed(() => recent.value?.trips?.slice(0, 5) ?? [])
           </div>
 
           <NuxtLink
-            :to="`/trips/${lastTrip.boot_id}`"
+            :to="`/trips/${lastTrip.trip_id}`"
             class="inline-flex items-center gap-1.5 text-[13px] font-semibold transition-all hover:gap-2.5"
             style="color: var(--color-accent)"
           >
@@ -284,10 +285,10 @@ const recentTrips = computed(() => recent.value?.trips?.slice(0, 5) ?? [])
       >
         <div
           v-for="(t, idx) in recentTrips"
-          :key="t.boot_id"
+          :key="t.trip_id"
           class="flex items-center justify-between px-5 py-3.5 cursor-pointer transition-colors hover:bg-[var(--color-surface-elevated)]"
           :style="idx < recentTrips.length - 1 ? { borderBottom: '1px solid var(--color-border)' } : {}"
-          @click="navigateTo(`/trips/${t.boot_id}`)"
+          @click="navigateTo(`/trips/${t.trip_id}`)"
         >
           <div class="flex items-center gap-4">
             <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style="background: var(--color-accent-soft)">

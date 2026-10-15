@@ -20,11 +20,23 @@ describe('tags', () => {
 })
 
 describe('AnnotationStore', () => {
+  it('is keyed by trip id, and still accepts a bare boot id and a legacy boot_id on import', () => {
+    const s = new AnnotationStore(dir())
+    const trip = `${A}:1792030151843`
+    s.set(trip, { bookmarked: true }, 100)
+    expect(s.get(trip)).toMatchObject({ trip_id: trip, bookmarked: true })
+    expect(s.get(A)).toBeNull() // a trip's marks are not its boot's
+    s.set(B, { note: 'old key' }, 100)
+    expect(s.get(B)).toMatchObject({ trip_id: B, note: 'old key' })
+    expect(s.import({ version: 1, annotations: [{ boot_id: C, bookmarked: true, updated_at: 5 }, { trip_id: `${C}:7`, bookmarked: true, updated_at: 5 }] })).toBe(2)
+    for (const bad of [`${A}:`, `${A}:x`, `${A}:1:2`, `${A.slice(1)}:1`, `${A}:12345678901234567`]) expect(() => s.set(bad, {}), bad).toThrow(AnnotationError)
+  })
+
   it('sets, merges and reads back a trip\'s marks', () => {
     const s = new AnnotationStore(dir())
     expect(s.get(A)).toBeNull()
     s.set(A, { bookmarked: true, tags: ['Scenic', 'scenic', 'coast'] }, 100)
-    expect(s.get(A)).toEqual({ boot_id: A, bookmarked: true, note: null, tags: ['coast', 'scenic'], updated_at: 100 })
+    expect(s.get(A)).toEqual({ trip_id: A, bookmarked: true, note: null, tags: ['coast', 'scenic'], updated_at: 100 })
     // what is not sent is left alone
     s.set(A, { note: ' great light ' }, 200)
     expect(s.get(A)).toMatchObject({ bookmarked: true, note: 'great light', tags: ['coast', 'scenic'], updated_at: 200 })
@@ -51,9 +63,9 @@ describe('AnnotationStore', () => {
   it('lists by tag and by bookmark, and counts tags', () => {
     const s = new AnnotationStore(dir())
     s.set(A, { bookmarked: true, tags: ['coast'] }); s.set(B, { tags: ['coast', 'work'] }); s.set(C, { bookmarked: true })
-    expect(s.list({ tag: 'coast' }).map(a => a.boot_id).sort()).toEqual([A, B])
-    expect(s.list({ bookmarked: true }).map(a => a.boot_id).sort()).toEqual([A, C])
-    expect(s.list({ tag: 'coast', bookmarked: true }).map(a => a.boot_id)).toEqual([A])
+    expect(s.list({ tag: 'coast' }).map(a => a.trip_id).sort()).toEqual([A, B])
+    expect(s.list({ bookmarked: true }).map(a => a.trip_id).sort()).toEqual([A, C])
+    expect(s.list({ tag: 'coast', bookmarked: true }).map(a => a.trip_id)).toEqual([A])
     expect(s.tags()).toEqual([{ tag: 'coast', trips: 2 }, { tag: 'work', trips: 1 }])
   })
   it('finds trips by note or tag text, and treats % and _ as plain text', () => {

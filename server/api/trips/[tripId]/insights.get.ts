@@ -33,13 +33,13 @@ export default defineEventHandler(async (event) => {
     // distance from position speed integration
     queryTsdbObjects(`
       SELECT coalesce(sum(
-        speed_mps * least(lead_ms - mono_ms, 10000) / 1000.0
+        speed_mps * least(greatest(epoch_ms(lead_at) - epoch_ms(observed_at), 0), 10000) / 1000.0
       ), 0) AS distance_m
       FROM (
-        SELECT mono_ms, speed_mps,
-          lead(mono_ms) OVER (ORDER BY observed_at, mono_ms) AS lead_ms
+        SELECT observed_at, speed_mps,
+          lead(observed_at) OVER (ORDER BY observed_at, mono_ms) AS lead_at
         FROM ${tripPositions(trip)} WHERE ${trip.where()} AND speed_mps IS NOT NULL
-      ) WHERE lead_ms IS NOT NULL
+      ) WHERE lead_at IS NOT NULL
     `),
 
     // elevation gain/loss

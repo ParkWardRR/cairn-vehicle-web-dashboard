@@ -36,6 +36,11 @@ export interface TripScope {
  * longer names a trip.
  */
 export async function resolveTrip(tripId: string): Promise<TripScope> {
+  // The id is spliced into SQL below, so refuse anything that is not a trip id (or, for an old
+  // link, a bare boot id) before it gets there. 400, not 404: the id is malformed, not unknown.
+  if (!/^[0-9a-f]{32}(:[0-9]{1,16})?$/.test(tripId)) {
+    throw createError({ statusCode: 400, statusMessage: 'trip id is <vehicle id>:<start in ms>' })
+  }
   const idSql = sqlString(tripId)
   let rows = await queryTsdbObjects(`
     SELECT trip_id, vehicle_id,

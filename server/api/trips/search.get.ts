@@ -29,15 +29,23 @@ export default defineEventHandler(async (event) => {
     candidates = candidates ? new Set([...candidates].filter(x => s.has(x))) : s
   }
 
-  if (tag || bookmarked) narrow(marks.list({ tag: tag || undefined, bookmarked: bookmarked || undefined }).map(a => a.boot_id))
+  if (tag || bookmarked) narrow(marks.list({ tag: tag || undefined, bookmarked: bookmarked || undefined }).map(a => a.trip_id))
   if (text) {
     const hits = new Set(marks.matching(text))
     const needle = text.toLowerCase()
     const resolver = getPlaceResolver()
     const named = resolver.saved.list().filter(p => p.name.toLowerCase().includes(needle))
     if (named.length) {
+      // Visits are learned per boot; a trip is found by the boot it started in, which is the
+      // one boot v_trip_summary reports for it.
+      const visited = new Set<string>()
       for (const v of resolver.store.allVisits()) {
-        if (named.some(p => distM(p.lat, p.lon, v.lat, v.lon) <= p.radius_m)) hits.add(v.boot_id)
+        if (named.some(p => distM(p.lat, p.lon, v.lat, v.lon) <= p.radius_m)) visited.add(v.boot_id)
+      }
+      if (visited.size) {
+        for (const t of await queryTsdbObjects('SELECT trip_id, boot_id FROM v_trip_summary')) {
+          if (visited.has(String(t.boot_id))) hits.add(String(t.trip_id))
+        }
       }
     }
     narrow(hits)
@@ -46,9 +54,9 @@ export default defineEventHandler(async (event) => {
   const v = await vehicleScope(event)
   const where: string[] = []
   if (candidates) {
-    const ids = [...(candidates as Set<string>)].filter(id => /^[0-9a-f]{32}$/.test(id)).slice(0, CAP)
+    const ids = [...(candidates as Set<string>)].filter(id => /^[0-9a-f]{32}:[0-9]{1,16}$/.test(id)).slice(0, CAP)
     if (!ids.length) return { trips: [], total: 0, query: { q: text, tag, bookmarked } }
-    where.push(`d.boot_id IN (${ids.map(id => `'${id}'`).join(',')})`)
+    where.push(`d.trip_id IN (${ids.map(id => `'${id}'`).join(',')})`)
   }
   if (from) where.push(`d.started_at >= ${sqlString(from.toISOString().slice(0, 10))}::TIMESTAMP`)
   if (to) where.push(`d.started_at < ${sqlString(new Date(to.getTime() + 86_400_000).toISOString().slice(0, 10))}::TIMESTAMP`)
@@ -63,9 +71,9 @@ export default defineEventHandler(async (event) => {
       ${base} ORDER BY d.started_at DESC LIMIT ${limit} OFFSET ${offset}`),
     queryTsdbObjects(`SELECT count(*) AS total ${base}`),
   ])
-  const marked = new Map(marks.list().map(a => [a.boot_id, a]))
+  const marked = new Map(marks.list().map(a => [a.trip_id, a]))
   return {
-    trips: trips.map(t => ({ ...t, annotation: marked.get(t.boot_id) ?? null })),
+    trips: trips.map(t => ({ ...t, annotation: marked.get(t.trip_id) ?? null })),
     total: Number(total[0]?.total ?? 0),
     query: { q: text, tag, bookmarked },
   }

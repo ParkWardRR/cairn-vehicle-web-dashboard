@@ -23,7 +23,7 @@ export default defineEventHandler(async (event) => {
       (SELECT count(*) FROM transition${v.where()}) AS transition_rows,
       (SELECT count(*) FROM gap${v.where()}) AS gap_rows,
       (SELECT count(*) FROM bundles${v.where()}) AS bundle_rows,
-      (SELECT count(*) FROM (SELECT DISTINCT vehicle_id, boot_id FROM position${v.where()})) AS trips
+      (SELECT count(*) FROM v_trip_summary${v.where()}) AS trips
   `)
 
   return {

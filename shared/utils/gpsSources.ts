@@ -52,7 +52,17 @@ export function splitGpsSources(rows: GpsPositionRow[]): { device: GpsPositionRo
     if (!hasFix(r)) continue
     ;(isPhoneFix(r) ? phone : device).push(r)
   }
-  const byTime = (a: GpsPositionRow, b: GpsPositionRow) => a.mono_ms - b.mono_ms
+  // By wall clock, not mono_ms: a trip can span boots, mono_ms restarts at each, and sorting on it
+  // would interleave the boots' fixes into a zigzag. mono_ms is the tie-break and the fallback for
+  // a fix with no wall-clock time. (Pairing the two sources, below, is still per-boot.)
+  const wall = (r: GpsPositionRow) => {
+    const t = r.observed_at ? Date.parse(r.observed_at) : NaN
+    return Number.isFinite(t) && t > Date.UTC(2000, 0, 1) ? t : NaN
+  }
+  const byTime = (a: GpsPositionRow, b: GpsPositionRow) => {
+    const ta = wall(a), tb = wall(b)
+    return (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) ? ta - tb : a.mono_ms - b.mono_ms
+  }
   return { device: device.sort(byTime), phone: phone.sort(byTime) }
 }
 

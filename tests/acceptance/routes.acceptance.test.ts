@@ -29,6 +29,7 @@ const PLACES_DIR = process.env.CAIRN_WEB_PLACES ?? ''
 const SERVICE_TOKEN = process.env.CAIRN_SERVICE_TOKEN ?? ''
 const BOOTSTRAP_CODE = process.env.CAIRN_BOOTSTRAP_CODE ?? ''
 const FAKE_TAILSCALE = process.env.CAIRN_FAKE_TAILSCALE ?? ''
+const PASSPHRASE = process.env.CAIRN_PASSPHRASE ?? ''
 const OWNER_LOGIN = 'owner@example.test'
 
 const inventory = JSON.parse(readFileSync(join(__dirname, '..', 'routes.json'), 'utf8')) as { method: string; path: string }[]
@@ -136,7 +137,9 @@ const between = (n: unknown, lo: number, hi: number) => typeof n === 'number' &&
 const GET = (base: string, route: string, o?: CallOpts) => call(base, 'GET', route, o)
 
 const UNKNOWN_BOOT = '0'.repeat(32)
-const BOOT_SCOPED = ['/api/trips/:bootId', '/api/trips/:bootId/events', '/api/trips/:bootId/fuel', '/api/trips/:bootId/insights', '/api/trips/:bootId/route', '/api/trips/:bootId/stops', '/api/trips/:bootId/telemetry', '/api/trips/:bootId/timeline']
+const UNKNOWN_TRIP = `${UNKNOWN_BOOT}:0`
+const tripKey = /^[0-9a-f]{32}:[0-9]+$/
+const TRIP_SCOPED = ['/api/trips/:tripId', '/api/trips/:tripId/events', '/api/trips/:tripId/fuel', '/api/trips/:tripId/insights', '/api/trips/:tripId/route', '/api/trips/:tripId/stops', '/api/trips/:tripId/telemetry', '/api/trips/:tripId/timeline']
 const BOOT_QUERY = ['/api/analytics/telemetry', '/api/analytics/imu', '/api/analytics/drive-summary', '/api/analytics/boost-detail', '/api/analytics/fuel-health']
 
 beforeAll(async () => {
@@ -154,7 +157,7 @@ afterAll(() => { fakeTailscale?.close() })
 // enrolled yet" cases see a fresh instance.
 
 describe('access control: no identity, no answer', () => {
-  const placeholders = { bootId: UNKNOWN_BOOT, id: '1' }
+  const placeholders = { tripId: UNKNOWN_TRIP, id: '1' }
 
   it('every route outside /api/auth refuses an anonymous caller with 401 and no data', async () => {
     for (const r of inventory.filter(x => !x.path.startsWith('/api/auth/'))) {
@@ -216,6 +219,22 @@ describe('access control: no identity, no answer', () => {
     // on a tailnet, but not a login this server lets in
     expect(await via(TAILNET.stranger)).toMatchObject({ on_tailnet: true, authenticated: false })
     expect(await via('192.168.1.40')).toMatchObject({ on_tailnet: false, authenticated: false })
+  })
+
+  it('signs in with the passphrase, and only with that one', async () => {
+    expect(PASSPHRASE, 'tests/staging.sh gives the data instance a passphrase').not.toBe('')
+    expect((await send(DATA, 'POST', '/api/auth/login-passphrase', { json: {} })).status).toBe(400)
+    const wrong = await send(DATA, 'POST', '/api/auth/login-passphrase', { json: { passphrase: `${PASSPHRASE}x` } })
+    expect(wrong.status).toBe(401)
+    expect(wrong.headers.get('set-cookie')).toBeNull()
+    const right = await send(DATA, 'POST', '/api/auth/login-passphrase', { json: { passphrase: PASSPHRASE } })
+    expect(right.status, right.text).toBe(200)
+    const cookie = String(right.headers.get('set-cookie')).split(';')[0]
+    expect(cookie).toMatch(/^cairn_session=/)
+    const me = await send(DATA, 'GET', '/api/auth/session', { headers: { cookie } })
+    expect(me.body).toMatchObject({ authenticated: true, method: 'passphrase', actor: 'owner' })
+    // an instance with no passphrase set does not offer the door at all
+    expect((await send(EMPTY, 'POST', '/api/auth/login-passphrase', { json: { passphrase: PASSPHRASE } })).status).toBe(503)
   })
 
   it('cannot sign in with a passkey that was never enrolled', async () => {
@@ -429,7 +448,7 @@ describe('representative data (synthetic demo store)', () => {
     const r = await GET(DATA, '/api/trips', { query: { limit: '200' } })
     trips = r.body.trips
     // the longest trip has the most to assert on
-    trip = [...trips].sort((a, b) => b.duration_s - a.duration_s)[0]
+    trip = [...trips].sort((a, b) => b.duration_ms - a.duration_ms)[0]
   })
 
   it('lists trips with the fields the dashboard reads', async () => {
@@ -439,16 +458,17 @@ describe('representative data (synthetic demo store)', () => {
     expect(trips.length).toBeGreaterThanOrEqual(10)
     for (const t of trips) {
       expect(t.vehicle_id).toMatch(hex32)
+      expect(t.trip_id).toMatch(tripKey)
       expect(t.boot_id).toMatch(hex32)
-      expect(t.duration_s).toBeGreaterThan(0)
-      expect(between(t.max_speed_kph, 0, 300)).toBe(true)
+      expect(t.duration_ms).toBeGreaterThan(0)
+      expect(between(t.max_obd_speed_kph, 0, 300)).toBe(true)
       expect(between(t.max_rpm, 0, 9000)).toBe(true)
       expect(t.obd_samples).toBeGreaterThan(0)
       expect(iso(t.start_time)).toBe(true)
       expect(between(t.start_lat, -90, 90)).toBe(true)
       expect(between(t.start_lon, -180, 180)).toBe(true)
     }
-    expect(new Set(trips.map(t => t.boot_id)).size).toBe(trips.length)
+    expect(new Set(trips.map(t => t.trip_id)).size).toBe(trips.length)
   })
 
   it('pages and sorts the trip list', async () => {
@@ -457,27 +477,27 @@ describe('representative data (synthetic demo store)', () => {
     expect(first.body.total).toBe(trips.length) // total is the whole store, not the page
 
     const page = await GET(DATA, '/api/trips', { query: { limit: '5', offset: '5' } })
-    expect(page.body.trips.map((t: any) => t.boot_id)).toEqual(trips.slice(5, 10).map(t => t.boot_id))
+    expect(page.body.trips.map((t: any) => t.trip_id)).toEqual(trips.slice(5, 10).map(t => t.trip_id))
 
     // newest first by default
     const starts = trips.map(t => Date.parse(t.start_time))
     expect(starts).toEqual([...starts].sort((a, b) => b - a))
 
-    const longest = await GET(DATA, '/api/trips', { query: { sort: '-duration_s', limit: '200' } })
-    const d = longest.body.trips.map((t: any) => t.duration_s)
+    const longest = await GET(DATA, '/api/trips', { query: { sort: '-duration_ms', limit: '200' } })
+    const d = longest.body.trips.map((t: any) => t.duration_ms)
     expect(d).toEqual([...d].sort((a, b) => b - a))
 
     // nonsense falls back to the defaults; it neither errors nor injects
-    const junk = await GET(DATA, '/api/trips', { query: { limit: 'abc', offset: '-4', sort: 'duration_s; drop table obd' } })
+    const junk = await GET(DATA, '/api/trips', { query: { limit: 'abc', offset: '-4', sort: 'duration_ms; drop table obd' } })
     expect(junk.status).toBe(200)
     expect(junk.body.trips.length).toBeGreaterThan(0)
   })
 
   it('serves one trip, consistent with the list', async () => {
-    const r = await GET(DATA, '/api/trips/:bootId', { params: { bootId: trip.boot_id } })
+    const r = await GET(DATA, '/api/trips/:tripId', { params: { tripId: trip.trip_id } })
     expect(r.status).toBe(200)
-    expect(r.body.boot_id).toBe(trip.boot_id)
-    expect(r.body.duration_s).toBe(trip.duration_s)
+    expect(r.body.trip_id).toBe(trip.trip_id)
+    expect(r.body.duration_ms).toBe(trip.duration_ms)
     expect(r.body.vehicle_id).toBe(trip.vehicle_id)
     // the single-trip view adds the start and end, each with a place
     expect(iso(r.body.start.observed_at)).toBe(true)
@@ -486,20 +506,21 @@ describe('representative data (synthetic demo store)', () => {
   })
 
   it('serves a trip\'s events, fuel, insights, route, stops, telemetry and timeline', async () => {
-    const p = { bootId: trip.boot_id }
-    const events = await GET(DATA, '/api/trips/:bootId/events', { params: p })
+    const p = { tripId: trip.trip_id }
+    const events = await GET(DATA, '/api/trips/:tripId/events', { params: p })
     expect(events.status).toBe(200)
     expect(Array.isArray(events.body.imuEvents)).toBe(true)
     expect(events.body.transitions.length).toBeGreaterThan(0)
-    for (const t of events.body.transitions) expect(t.boot_id).toBe(trip.boot_id)
+    for (const t of events.body.transitions) expect(t.boot_id).toMatch(hex32)
 
-    const fuel = await GET(DATA, '/api/trips/:bootId/fuel', { params: p })
+    const fuel = await GET(DATA, '/api/trips/:tripId/fuel', { params: p })
     expect(fuel.body.samples.length).toBeGreaterThan(10)
     expect(fuel.body.distance_m).toBeGreaterThan(100)
-    expect(Math.abs(fuel.body.duration_s - trip.duration_s)).toBeLessThanOrEqual(5)
+    // fuel is judged over the time spent driving (the whole span when a trip has no legs)
+    expect(Math.abs(fuel.body.duration_s - (trip.driving_ms ?? trip.duration_ms) / 1000)).toBeLessThanOrEqual(5)
     for (const s of fuel.body.samples.slice(0, 50)) expect(between(s.speed_kph, 0, 300)).toBe(true)
 
-    const insights = await GET(DATA, '/api/trips/:bootId/insights', { params: p })
+    const insights = await GET(DATA, '/api/trips/:tripId/insights', { params: p })
     expect(insights.body.insights.length).toBeGreaterThanOrEqual(3)
     for (const i of insights.body.insights) {
       expect(i.label).toBeTruthy()
@@ -507,7 +528,7 @@ describe('representative data (synthetic demo store)', () => {
       expect(typeof i.icon).toBe('string')
     }
 
-    const route = await GET(DATA, '/api/trips/:bootId/route', { params: p })
+    const route = await GET(DATA, '/api/trips/:tripId/route', { params: p })
     expect(route.body.type).toBe('FeatureCollection')
     const line = route.body.features[0].geometry
     expect(line.type).toBe('LineString')
@@ -517,22 +538,24 @@ describe('representative data (synthetic demo store)', () => {
       expect(between(lon, -180, 180)).toBe(true)
     }
 
-    const stops = await GET(DATA, '/api/trips/:bootId/stops', { params: p })
+    const stops = await GET(DATA, '/api/trips/:tripId/stops', { params: p })
     expect(Array.isArray(stops.body.stops)).toBe(true)
     expect(typeof stops.body.pending).toBe('boolean')
     expect(Array.isArray(stops.body.attribution)).toBe(true)
 
-    const tel = await GET(DATA, '/api/trips/:bootId/telemetry', { params: p })
+    const tel = await GET(DATA, '/api/trips/:tripId/telemetry', { params: p })
     expect(tel.body.telemetry.length).toBeGreaterThan(50)
+    // in wall-clock order: a trip can span boots, and mono_ms restarts at each
     let prev = -1
     for (const row of tel.body.telemetry) {
-      expect(row.mono_ms).toBeGreaterThanOrEqual(prev)
-      prev = row.mono_ms
+      const at = Date.parse(row.observed_at)
+      expect(at).toBeGreaterThanOrEqual(prev)
+      prev = at
       expect(between(row.speed_kph, 0, 300)).toBe(true)
       expect(between(row.rpm, 0, 9000)).toBe(true)
     }
 
-    const tl = await GET(DATA, '/api/trips/:bootId/timeline', { params: p })
+    const tl = await GET(DATA, '/api/trips/:tripId/timeline', { params: p })
     for (const series of ['obd', 'boost', 'gps']) expect(tl.body[series].length).toBeGreaterThan(0)
   })
 
@@ -540,8 +563,8 @@ describe('representative data (synthetic demo store)', () => {
     const stats = await GET(DATA, '/api/dashboard/stats')
     expect(stats.status).toBe(200)
     expect(stats.body.allTime.total_trips).toBe(trips.length)
-    expect(stats.body.allTime.max_speed_kph).toBe(Math.max(...trips.map(t => t.max_speed_kph)))
-    const sum = trips.reduce((a, t) => a + t.duration_s, 0)
+    expect(stats.body.allTime.max_speed_kph).toBe(Math.max(...trips.map(t => t.max_obd_speed_kph)))
+    const sum = trips.reduce((a, t) => a + t.duration_ms / 1000, 0)
     expect(Math.abs(stats.body.allTime.total_duration_s - sum) / sum).toBeLessThan(0.01)
     expect(stats.body.allTime.total_distance_m).toBeGreaterThan(0)
     expect(stats.body.week.trips).toBeLessThanOrEqual(stats.body.month.trips)
@@ -549,8 +572,8 @@ describe('representative data (synthetic demo store)', () => {
 
     const recent = await GET(DATA, '/api/dashboard/recent')
     expect(recent.body.trips.length).toBeGreaterThan(0)
-    const known = new Set(trips.map(t => t.boot_id))
-    for (const t of recent.body.trips) expect(known.has(t.boot_id)).toBe(true)
+    const known = new Set(trips.map(t => t.trip_id))
+    for (const t of recent.body.trips) expect(known.has(t.trip_id)).toBe(true)
 
     const hl = await GET(DATA, '/api/dashboard/highlights')
     expect(hl.body.vehicle_id).toMatch(hex32)
@@ -616,7 +639,8 @@ describe('representative data (synthetic demo store)', () => {
 
     const fe = await GET(DATA, '/api/analytics/fuel-economy')
     expect(fe.body.samples.length).toBeGreaterThan(100)
-    expect(fe.body.perTrip.length).toBe(trips.length)
+    // per boot, like every analytics route: a trip that spans a power cycle is two rows here
+    expect(fe.body.perTrip.length).toBe((await GET(DATA, '/api/analytics/drive-summary')).body.driveSummary.length)
     expect(fe.body.timingByLoad.length).toBeGreaterThan(0)
 
     const pulls = await GET(DATA, '/api/analytics/pulls')
@@ -633,9 +657,10 @@ describe('representative data (synthetic demo store)', () => {
 
   it('serves the boot-scoped analytics, matching the trip routes', async () => {
     const tel = await GET(DATA, '/api/analytics/telemetry', { query: { boot_id: trip.boot_id } })
-    const tripTel = await GET(DATA, '/api/trips/:bootId/telemetry', { params: { bootId: trip.boot_id } })
+    const tripTel = await GET(DATA, '/api/trips/:tripId/telemetry', { params: { tripId: trip.trip_id } })
     expect(tel.status).toBe(200)
-    expect(tel.body.telemetry.length).toBe(tripTel.body.telemetry.length)
+    // the trip covers every boot it spans, so it holds at least what its first boot does
+    expect(tripTel.body.telemetry.length).toBeGreaterThanOrEqual(tel.body.telemetry.length)
 
     const imu = await GET(DATA, '/api/analytics/imu', { query: { boot_id: trip.boot_id } })
     expect(imu.body.samples.length).toBeGreaterThan(0)
@@ -671,7 +696,7 @@ describe('history: statistics for any period, and marks on trips', () => {
     const r = await GET(DATA, '/api/stats/period', { query: { period: 'custom', from: first, to: last } })
     expect(r.status, r.text).toBe(200)
     expect(r.body.totals.trips).toBe(trips.length)
-    expect(r.body.totals.duration_s).toBeCloseTo(trips.reduce((n, t) => n + Number(t.duration_s), 0), 3)
+    expect(r.body.totals.duration_s).toBeCloseTo(trips.reduce((n, t) => n + Number(t.duration_ms) / 1000, 0), 3)
     const dash = (await GET(DATA, '/api/dashboard/stats')).body.allTime
     expect(r.body.totals.distance_m).toBeCloseTo(Number(dash.total_distance_m), 0)
     expect(r.body.totals.max_speed_kph).toBe(Number(dash.max_speed_kph))
@@ -715,49 +740,49 @@ describe('history: statistics for any period, and marks on trips', () => {
     expect(r.body.totals.trips).toBe(0)
   })
 
-  const BOOT = () => trips[0].boot_id
-  const OTHER = () => trips[1].boot_id
+  const TRIP = () => trips[0].trip_id
+  const OTHER = () => trips[1].trip_id
 
   it('marks a trip: bookmark, tags and a note, read back and listed', async () => {
-    const put = await call(DATA, 'PUT', '/api/annotations/:bootId', { params: { bootId: BOOT() }, json: { bookmarked: true, tags: ['Scenic', 'coast road'], note: 'Best drive of the autumn' } })
+    const put = await call(DATA, 'PUT', '/api/annotations/:tripId', { params: { tripId: TRIP() }, json: { bookmarked: true, tags: ['Scenic', 'coast road'], note: 'Best drive of the autumn' } })
     expect(put.status, put.text).toBe(200)
-    expect(put.body.annotation).toMatchObject({ boot_id: BOOT(), bookmarked: true, tags: ['coast road', 'scenic'], note: 'Best drive of the autumn' })
-    expect((await GET(DATA, '/api/annotations/:bootId', { params: { bootId: BOOT() } })).body.annotation.note).toBe('Best drive of the autumn')
+    expect(put.body.annotation).toMatchObject({ trip_id: TRIP(), bookmarked: true, tags: ['coast road', 'scenic'], note: 'Best drive of the autumn' })
+    expect((await GET(DATA, '/api/annotations/:tripId', { params: { tripId: TRIP() } })).body.annotation.note).toBe('Best drive of the autumn')
     const list = await GET(DATA, '/api/annotations')
-    expect(list.body.annotations.map((a: any) => a.boot_id)).toContain(BOOT())
+    expect(list.body.annotations.map((a: any) => a.trip_id)).toContain(TRIP())
     expect(list.body.tags).toEqual(expect.arrayContaining([{ tag: 'scenic', trips: 1 }]))
     expect((await GET(DATA, '/api/annotations', { query: { tag: 'scenic' } })).body.annotations).toHaveLength(1)
     expect((await GET(DATA, '/api/annotations', { query: { bookmarked: '1' } })).body.annotations.length).toBeGreaterThan(0)
     // an unmarked trip reads back as empty, not as an error
-    expect((await GET(DATA, '/api/annotations/:bootId', { params: { bootId: '1'.repeat(32) } })).body.annotation).toMatchObject({ bookmarked: false, tags: [], note: null })
+    expect((await GET(DATA, '/api/annotations/:tripId', { params: { tripId: `${'1'.repeat(32)}:1` } })).body.annotation).toMatchObject({ bookmarked: false, tags: [], note: null })
   })
 
   it('refuses bad marks', async () => {
-    const put = (bootId: string, json: unknown) => call(DATA, 'PUT', '/api/annotations/:bootId', { params: { bootId }, json })
+    const put = (tripId: string, json: unknown) => call(DATA, 'PUT', '/api/annotations/:tripId', { params: { tripId }, json })
     expect((await put('nope', {})).status).toBe(400)
-    expect((await put(BOOT(), { tags: ["a'b"] })).status).toBe(400)
-    expect((await put(BOOT(), { note: 'x'.repeat(2001) })).status).toBe(400)
-    expect((await put(BOOT(), { bookmarked: 'yes' })).status).toBe(400)
-    expect((await call(DATA, 'PUT', '/api/annotations/:bootId', { params: { bootId: BOOT() }, raw: '{}', type: 'text/plain' })).status).toBe(415)
-    expect((await GET(DATA, '/api/annotations/:bootId', { params: { bootId: 'nope' } })).status).toBe(400)
-    expect((await call(DATA, 'DELETE', '/api/annotations/:bootId', { params: { bootId: '2'.repeat(32) } })).status).toBe(404)
+    expect((await put(TRIP(), { tags: ["a'b"] })).status).toBe(400)
+    expect((await put(TRIP(), { note: 'x'.repeat(2001) })).status).toBe(400)
+    expect((await put(TRIP(), { bookmarked: 'yes' })).status).toBe(400)
+    expect((await call(DATA, 'PUT', '/api/annotations/:tripId', { params: { tripId: TRIP() }, raw: '{}', type: 'text/plain' })).status).toBe(415)
+    expect((await GET(DATA, '/api/annotations/:tripId', { params: { tripId: 'nope' } })).status).toBe(400)
+    expect((await call(DATA, 'DELETE', '/api/annotations/:tripId', { params: { tripId: `${'2'.repeat(32)}:2` } })).status).toBe(404)
   })
 
   it('searches by tag, bookmark, note text and date, and shows the marks on the result', async () => {
-    await call(DATA, 'PUT', '/api/annotations/:bootId', { params: { bootId: OTHER() }, json: { tags: ['commute'] } })
+    await call(DATA, 'PUT', '/api/annotations/:tripId', { params: { tripId: OTHER() }, json: { tags: ['commute'] } })
     const search = (query: Record<string, string>) => GET(DATA, '/api/trips/search', { query })
-    const ids = (r: Res) => r.body.trips.map((t: any) => t.boot_id)
+    const ids = (r: Res) => r.body.trips.map((t: any) => t.trip_id)
 
-    expect(ids(await search({ tag: 'scenic' }))).toEqual([BOOT()])
+    expect(ids(await search({ tag: 'scenic' }))).toEqual([TRIP()])
     expect(ids(await search({ tag: 'commute' }))).toEqual([OTHER()])
-    expect(ids(await search({ bookmarked: '1' }))).toEqual([BOOT()])
-    expect(ids(await search({ q: 'autumn' }))).toEqual([BOOT()])
-    expect(ids(await search({ q: 'COAST' }))).toEqual([BOOT()])
+    expect(ids(await search({ bookmarked: '1' }))).toEqual([TRIP()])
+    expect(ids(await search({ q: 'autumn' }))).toEqual([TRIP()])
+    expect(ids(await search({ q: 'COAST' }))).toEqual([TRIP()])
     expect(ids(await search({ q: 'no such thing anywhere' }))).toEqual([])
     expect(ids(await search({ tag: 'scenic', q: 'commute' }))).toEqual([])
     const hit = (await search({ tag: 'scenic' })).body.trips[0]
     expect(hit.annotation).toMatchObject({ bookmarked: true, tags: ['coast road', 'scenic'] })
-    expect(hit).toHaveProperty('duration_s')
+    expect(hit).toHaveProperty('duration_ms')
     expect(hit).toHaveProperty('start_time')
 
     // dates narrow the same way the stats do
@@ -773,7 +798,7 @@ describe('history: statistics for any period, and marks on trips', () => {
     const exp = await GET(DATA, '/api/annotations/export')
     expect(exp.status).toBe(200)
     expect(exp.headers.get('content-disposition')).toMatch(/attachment; filename="cairn-trip-marks-\d{4}-\d{2}-\d{2}\.json"/)
-    expect(exp.body.annotations.map((a: any) => a.boot_id)).toEqual(expect.arrayContaining([BOOT(), OTHER()]))
+    expect(exp.body.annotations.map((a: any) => a.trip_id)).toEqual(expect.arrayContaining([TRIP(), OTHER()]))
     const again = await call(DATA, 'POST', '/api/annotations/import', { json: exp.body })
     expect(again.body).toEqual({ ok: true, changed: 0 })
     expect((await call(DATA, 'POST', '/api/annotations/import', { json: { nope: 1 } })).status).toBe(400)
@@ -781,17 +806,17 @@ describe('history: statistics for any period, and marks on trips', () => {
   })
 
   it('removes marks, and the search forgets them', async () => {
-    expect((await call(DATA, 'DELETE', '/api/annotations/:bootId', { params: { bootId: BOOT() } })).body).toEqual({ ok: true })
-    expect((await call(DATA, 'DELETE', '/api/annotations/:bootId', { params: { bootId: OTHER() } })).body).toEqual({ ok: true })
+    expect((await call(DATA, 'DELETE', '/api/annotations/:tripId', { params: { tripId: TRIP() } })).body).toEqual({ ok: true })
+    expect((await call(DATA, 'DELETE', '/api/annotations/:tripId', { params: { tripId: OTHER() } })).body).toEqual({ ok: true })
     expect((await GET(DATA, '/api/trips/search', { query: { bookmarked: '1' } })).body.trips).toEqual([])
     expect((await GET(DATA, '/api/annotations')).body.annotations).toEqual([])
   })
 
   it('the marks are as protected as everything else', async () => {
-    for (const [m, p] of [['GET', '/api/annotations'], ['GET', '/api/stats/period'], ['GET', '/api/trips/search'], ['GET', '/api/annotations/export'], ['POST', '/api/annotations/import'], ['PUT', '/api/annotations/:bootId'], ['DELETE', '/api/annotations/:bootId']] as const) {
-      expect((await call(DATA, m, p, { params: { bootId: BOOT() }, auth: 'none', ...(m === 'GET' ? {} : { json: {} }) })).status, `${m} ${p}`).toBe(401)
+    for (const [m, p] of [['GET', '/api/annotations'], ['GET', '/api/stats/period'], ['GET', '/api/trips/search'], ['GET', '/api/annotations/export'], ['POST', '/api/annotations/import'], ['PUT', '/api/annotations/:tripId'], ['DELETE', '/api/annotations/:tripId']] as const) {
+      expect((await call(DATA, m, p, { params: { tripId: TRIP() }, auth: 'none', ...(m === 'GET' ? {} : { json: {} }) })).status, `${m} ${p}`).toBe(401)
     }
-    expect((await call(DATA, 'PUT', '/api/annotations/:bootId', { params: { bootId: BOOT() }, auth: 'service', json: { bookmarked: true } })).status).toBe(403)
+    expect((await call(DATA, 'PUT', '/api/annotations/:tripId', { params: { tripId: TRIP() }, auth: 'service', json: { bookmarked: true } })).status).toBe(403)
   })
 })
 
@@ -806,14 +831,14 @@ describe('your data: shareable pictures and backup', () => {
   let track: Array<[number, number]> = []   // [lat, lon] of the whole drive, as the store has it
 
   beforeAll(async () => {
-    const trips = (await GET(DATA, '/api/trips', { query: { limit: '200', sort: '-duration_s' } })).body.trips
-    boot = trips[0].boot_id
-    const route = (await GET(DATA, '/api/trips/:bootId/route', { params: { bootId: boot } })).body
+    const trips = (await GET(DATA, '/api/trips', { query: { limit: '200', sort: '-duration_ms' } })).body.trips
+    boot = trips[0].trip_id
+    const route = (await GET(DATA, '/api/trips/:tripId/route', { params: { tripId: boot } })).body
     track = route.features[0].geometry.coordinates.map((c: number[]) => [c[1], c[0]])
   })
 
   it('draws the route without its true start and end, and carries nothing else about the trip', async () => {
-    const r = await GET(DATA, '/api/trips/:bootId/image-data', { params: { bootId: boot } })
+    const r = await GET(DATA, '/api/trips/:tripId/image-data', { params: { tripId: boot } })
     expect(r.status, r.text).toBe(200)
     const pts: Array<[number, number]> = r.body.segments.flat().map((p: any) => [p.lat, p.lon])
     expect(pts.length).toBeGreaterThan(10)
@@ -831,7 +856,7 @@ describe('your data: shareable pictures and backup', () => {
   })
 
   it('asks for more hidden at each end, but never less than the minimum', async () => {
-    const n = async (trim: string) => (await GET(DATA, '/api/trips/:bootId/image-data', { params: { bootId: boot }, query: { trim } })).body
+    const n = async (trim: string) => (await GET(DATA, '/api/trips/:tripId/image-data', { params: { tripId: boot }, query: { trim } })).body
     const base = await n('300')
     expect((await n('0')).redaction.trim_m).toBe(300)
     expect((await n('-50')).redaction.trim_m).toBe(300)
@@ -847,13 +872,13 @@ describe('your data: shareable pictures and backup', () => {
     const made = await call(DATA, 'POST', '/api/places/saved', { json: { name: 'Acceptance home', lat: mid[0], lon: mid[1], category: 'home', radius_m: 150 } })
     expect(made.status, made.text).toBe(200)
     try {
-      const r = await GET(DATA, '/api/trips/:bootId/image-data', { params: { bootId: boot } })
+      const r = await GET(DATA, '/api/trips/:tripId/image-data', { params: { tripId: boot } })
       expect(r.body.redaction.zones).toBe(1)
       for (const p of r.body.segments.flat()) expect(metres([p.lat, p.lon], mid), 'inside the zone').toBeGreaterThan(250)
       expect(r.body.segments.length).toBeGreaterThanOrEqual(1)
       // a place that is not private does not hide anything
       const food = await call(DATA, 'POST', '/api/places/saved', { json: { name: 'Acceptance cafe', lat: track[10][0], lon: track[10][1], category: 'food' } })
-      expect((await GET(DATA, '/api/trips/:bootId/image-data', { params: { bootId: boot } })).body.redaction.zones).toBe(1)
+      expect((await GET(DATA, '/api/trips/:tripId/image-data', { params: { tripId: boot } })).body.redaction.zones).toBe(1)
       await call(DATA, 'DELETE', '/api/places/saved/:id', { params: { id: String(food.body.saved.id) } })
     } finally {
       await call(DATA, 'DELETE', '/api/places/saved/:id', { params: { id: String(made.body.saved.id) } })
@@ -861,22 +886,22 @@ describe('your data: shareable pictures and backup', () => {
   })
 
   it('refuses a bad or unknown trip', async () => {
-    expect((await GET(DATA, '/api/trips/:bootId/image-data', { params: { bootId: 'not-a-boot-id' } })).status).toBe(400)
-    expect((await GET(DATA, '/api/trips/:bootId/image-data', { params: { bootId: UNKNOWN_BOOT } })).status).toBe(404)
-    expect((await GET(DATA, '/api/trips/:bootId/image-data', { params: { bootId: boot }, auth: 'none' })).status).toBe(401)
+    expect((await GET(DATA, '/api/trips/:tripId/image-data', { params: { tripId: 'not-a-trip-id' } })).status).toBe(400)
+    expect((await GET(DATA, '/api/trips/:tripId/image-data', { params: { tripId: UNKNOWN_TRIP } })).status).toBe(404)
+    expect((await GET(DATA, '/api/trips/:tripId/image-data', { params: { tripId: boot }, auth: 'none' })).status).toBe(401)
   })
 
   it('exports everything in one file and restores it into a scratch instance, repeatably', async () => {
     // something of each kind in the source
     const place = await call(DATA, 'POST', '/api/places/saved', { json: { name: 'Backup test place', lat: 36.61, lon: -121.88, category: 'groceries' } })
-    await call(DATA, 'PUT', '/api/annotations/:bootId', { params: { bootId: boot }, json: { bookmarked: true, tags: ['backup'], note: 'restore me' } })
+    await call(DATA, 'PUT', '/api/annotations/:tripId', { params: { tripId: boot }, json: { bookmarked: true, tags: ['backup'], note: 'restore me' } })
     try {
       const exp = await GET(DATA, '/api/data/export')
       expect(exp.status).toBe(200)
       expect(exp.headers.get('content-disposition')).toMatch(/attachment; filename="cairn-data-\d{4}-\d{2}-\d{2}\.json"/)
       expect(exp.body).toMatchObject({ kind: 'cairn-data', version: 1 })
       expect(exp.body.saved_places.saved.map((p: any) => p.name)).toContain('Backup test place')
-      expect(exp.body.trip_marks.annotations.map((a: any) => a.boot_id)).toContain(boot)
+      expect(exp.body.trip_marks.annotations.map((a: any) => a.trip_id)).toContain(boot)
       // what is not user data is not in it
       expect(exp.text).not.toMatch(/passkey|session|public_key|service-token|bootstrap/i)
 
@@ -895,21 +920,21 @@ describe('your data: shareable pictures and backup', () => {
       const strip = (s: any[]) => s.map(({ name, lat, lon, category, radius_m }) => ({ name, lat, lon, category, radius_m })).sort((a, b) => a.name.localeCompare(b.name))
       expect(strip(after.saved_places.saved)).toEqual(strip(exp.body.saved_places.saved))
       expect(after.trip_marks.annotations).toEqual(exp.body.trip_marks.annotations)
-      expect((await GET(EMPTY, '/api/annotations/:bootId', { params: { bootId: boot } })).body.annotation.note).toBe('restore me')
+      expect((await GET(EMPTY, '/api/annotations/:tripId', { params: { tripId: boot } })).body.annotation.note).toBe('restore me')
 
       // restoring again changes nothing
       const again = await call(EMPTY, 'POST', '/api/data/import', { json: exp.body })
       expect(again.body).toMatchObject({ ok: true, saved_places: { added: 0 }, trip_marks: { changed: 0 } })
     } finally {
       await call(DATA, 'DELETE', '/api/places/saved/:id', { params: { id: String(place.body.saved.id) } })
-      await call(DATA, 'DELETE', '/api/annotations/:bootId', { params: { bootId: boot } })
+      await call(DATA, 'DELETE', '/api/annotations/:tripId', { params: { tripId: boot } })
       // leave the scratch instance as it was
       const left = (await GET(EMPTY, '/api/places/saved/export')).body.saved
       for (const p of left) {
         const id = (await GET(EMPTY, '/api/places')).body.saved.find((x: any) => x.name === p.name)?.id
         if (id) await call(EMPTY, 'DELETE', '/api/places/saved/:id', { params: { id: String(id) } })
       }
-      await call(EMPTY, 'DELETE', '/api/annotations/:bootId', { params: { bootId: boot } })
+      await call(EMPTY, 'DELETE', '/api/annotations/:tripId', { params: { tripId: boot } })
     }
   })
 
@@ -972,8 +997,8 @@ describe('empty store: the same routes return empty, not errors', () => {
   })
 
   it('answers every trip route for a trip that does not exist, with empty or 404, never an error', async () => {
-    for (const route of BOOT_SCOPED) {
-      const r = await GET(EMPTY, route, { params: { bootId: UNKNOWN_BOOT } })
+    for (const route of TRIP_SCOPED) {
+      const r = await GET(EMPTY, route, { params: { tripId: UNKNOWN_TRIP } })
       expect([200, 404], route).toContain(r.status)
     }
     for (const route of BOOT_QUERY) {
@@ -991,10 +1016,10 @@ describe('empty store: the same routes return empty, not errors', () => {
 
 describe('bad input', () => {
   it('an unknown trip is a 404, and its sub-resources are empty or 404', async () => {
-    expect((await GET(DATA, '/api/trips/:bootId', { params: { bootId: UNKNOWN_BOOT } })).status).toBe(404)
-    expect((await GET(DATA, '/api/trips/:bootId', { params: { bootId: 'not-a-boot-id' } })).status).toBe(404)
-    for (const route of BOOT_SCOPED.slice(1)) {
-      const r = await GET(DATA, route, { params: { bootId: UNKNOWN_BOOT } })
+    expect((await GET(DATA, '/api/trips/:tripId', { params: { tripId: UNKNOWN_TRIP } })).status).toBe(404)
+    expect((await GET(DATA, '/api/trips/:tripId', { params: { tripId: 'not-a-trip-id' } })).status).toBe(400)
+    for (const route of TRIP_SCOPED.slice(1)) {
+      const r = await GET(DATA, route, { params: { tripId: UNKNOWN_TRIP } })
       expect([200, 404], route).toContain(r.status)
       if (r.status === 200) {
         // empty, not invented
@@ -1053,7 +1078,7 @@ describe('bad input', () => {
 // ─── missing capability ──────────────────────────────────────────────────────
 
 describe('missing capability: the store is not there', () => {
-  const fakeBoot = { bootId: UNKNOWN_BOOT }
+  const fakeBoot = { tripId: UNKNOWN_TRIP }
 
   // (the phones routes talk to cairn-server, not the store, and are human-only)
   it('every store-backed route answers 502 "store unreachable": a JSON error, quickly', async () => {
@@ -1123,9 +1148,9 @@ describe('saved places: access and round trip', () => {
 
   it('no route reveals where the saved places live on disk', async () => {
     expect(PLACES_DIR, 'CAIRN_WEB_PLACES must be set').toBeTruthy()
-    const tripBoot = (await GET(DATA, '/api/trips')).body.trips[0].boot_id
+    const tripBoot = (await GET(DATA, '/api/trips')).body.trips[0]
     for (const r of inventory.filter(x => x.method === 'GET')) {
-      const res = await GET(DATA, r.path, { params: { bootId: tripBoot }, query: { boot_id: tripBoot } })
+      const res = await GET(DATA, r.path, { params: { tripId: tripBoot.trip_id }, query: { boot_id: tripBoot.boot_id } })
       expect(res.text, r.path).not.toContain(PLACES_DIR)
       expect(res.text, r.path).not.toMatch(/\.sqlite/)
     }
