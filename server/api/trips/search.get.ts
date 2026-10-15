@@ -50,23 +50,17 @@ export default defineEventHandler(async (event) => {
     if (!ids.length) return { trips: [], total: 0, query: { q: text, tag, bookmarked } }
     where.push(`d.boot_id IN (${ids.map(id => `'${id}'`).join(',')})`)
   }
-  if (from) where.push(`first_pos.observed_at >= ${sqlString(from.toISOString().slice(0, 10))}::TIMESTAMP`)
-  if (to) where.push(`first_pos.observed_at < ${sqlString(new Date(to.getTime() + 86_400_000).toISOString().slice(0, 10))}::TIMESTAMP`)
+  if (from) where.push(`d.started_at >= ${sqlString(from.toISOString().slice(0, 10))}::TIMESTAMP`)
+  if (to) where.push(`d.started_at < ${sqlString(new Date(to.getTime() + 86_400_000).toISOString().slice(0, 10))}::TIMESTAMP`)
   const vehicle = v.and('d').replace(/^ AND /, '')
   if (vehicle) where.push(vehicle)
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : ''
 
-  const base = `
-    FROM v_trip_summary d
-    LEFT JOIN (
-      SELECT vehicle_id, boot_id, observed_at, lat, lon
-      FROM (SELECT *, row_number() OVER (PARTITION BY vehicle_id, boot_id ORDER BY mono_ms ASC) AS rn FROM position${v.where()}) WHERE rn = 1
-    ) first_pos USING (vehicle_id, boot_id)
-    ${clause}`
+  const base = `FROM v_trip_summary d ${clause}`
   const [trips, total] = await Promise.all([
     queryTsdbObjects(`
-      SELECT d.*, first_pos.observed_at AS start_time, first_pos.lat AS start_lat, first_pos.lon AS start_lon
-      ${base} ORDER BY first_pos.observed_at DESC LIMIT ${limit} OFFSET ${offset}`),
+      SELECT d.*, d.started_at AS start_time
+      ${base} ORDER BY d.started_at DESC LIMIT ${limit} OFFSET ${offset}`),
     queryTsdbObjects(`SELECT count(*) AS total ${base}`),
   ])
   const marked = new Map(marks.list().map(a => [a.boot_id, a]))
