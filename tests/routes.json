@@ -17,6 +17,7 @@
   {"method": "GET", "path": "/api/annotations"},
   {"method": "GET", "path": "/api/auth/audit"},
   {"method": "POST", "path": "/api/auth/login-options"},
+  {"method": "POST", "path": "/api/auth/login-passphrase"},
   {"method": "POST", "path": "/api/auth/login-verify"},
   {"method": "POST", "path": "/api/auth/logout"},
   {"method": "GET", "path": "/api/auth/passkeys"},

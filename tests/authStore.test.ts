@@ -19,7 +19,7 @@ describe('AuthStore sessions', () => {
   })
   it('expires, and ends on logout', () => {
     const s = fresh()
-    const t = s.createSession('owner', 1, null, 1_000)
+    const t = s.createSession('owner', 1, null, 'passkey', 1_000)
     expect(s.session(t, 1_000 + 86_400_000 - 1)).not.toBeNull()
     expect(s.session(t, 1_000 + 86_400_000 + 1)).toBeNull()
     const u = s.createSession('owner', 30)
