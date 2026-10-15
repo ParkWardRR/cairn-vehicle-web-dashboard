@@ -75,6 +75,7 @@ export default defineNuxtConfig({
     authDataDir: '',
     authServiceToken: '',
     authBootstrapCode: '',
+    authPassphrase: '',
     public: {
       cartoKey: '',
     },

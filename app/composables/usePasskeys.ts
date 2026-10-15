@@ -3,7 +3,7 @@ import { browserSupportsWebAuthnAutofill, startAuthentication, startRegistration
 // The browser half of the passkey endpoints under /api/auth.
 export interface AuthSession {
   authenticated: boolean
-  method: 'service' | 'tailnet' | 'passkey' | 'off' | null
+  method: 'service' | 'tailnet' | 'passkey' | 'passphrase' | 'off' | null
   actor: string | null
   fresh: boolean
   passkeys: number

@@ -1,52 +1,30 @@
 <script setup lang="ts">
-import type { AuthSession } from '~/composables/usePasskeys'
+import { safeNext, errorText } from '~/composables/usePasskeys'
 
 definePageMeta({ layout: false })
 const route = useRoute()
-const { signIn, signInWithAutofill, autofillAvailable, addPasskey } = usePasskeys()
 
-const { data: session } = await useFetch<AuthSession>('/api/auth/session')
+const { data: session } = await useFetch<{ authenticated: boolean; method: string | null }>('/api/auth/session')
 const next = computed(() => safeNext(route.query.next))
-const code = ref('')
+const passphrase = ref('')
 const busy = ref(false)
 const error = ref('')
-const supported = ref(true)
-const autofill = ref(false)
-onMounted(async () => {
-  supported.value = typeof window.PublicKeyCredential !== 'undefined'
-  // Offer the saved passkey over the field below as soon as the page is up, where the browser can.
-  if (supported.value && (session.value?.passkeys ?? 0) > 0 && !session.value?.authenticated && await autofillAvailable()) {
-    autofill.value = true
-    try {
-      await signInWithAutofill()
-      window.location.assign(next.value)
-    } catch (e: any) {
-      // cancelled by the sign-in button, or the page was left: nothing to say
-      if (e?.name !== 'AbortError' && e?.name !== 'NotAllowedError') error.value = errorText(e)
-    }
-  }
-})
 
-async function run(fn: () => Promise<unknown>) {
+async function doLogin() {
   busy.value = true
   error.value = ''
   try {
-    await fn()
-    // a full load, so the server renders the next page with the new session
+    await $fetch('/api/auth/login-passphrase', {
+      method: 'POST',
+      body: { passphrase: passphrase.value },
+    })
     window.location.assign(next.value)
-  } catch (e) {
+  } catch (e: any) {
     error.value = errorText(e)
   } finally {
     busy.value = false
   }
 }
-const command = 'sudo cat /var/lib/cairn-ui/bootstrap-code'
-const copied = ref(false)
-async function copy() {
-  try { await navigator.clipboard.writeText(command); copied.value = true; setTimeout(() => { copied.value = false }, 2000) } catch { /* the command is on screen to select */ }
-}
-const doSignIn = () => run(signIn)
-const doEnrol = () => run(() => addPasskey('First passkey', code.value.trim() || undefined))
 </script>
 
 <template>
@@ -60,56 +38,30 @@ const doEnrol = () => run(() => addPasskey('First passkey', code.value.trim() ||
           You are signed in<span v-if="session.method === 'tailnet'"> through this Tailnet device</span>.
         </p>
         <a :href="next" class="block text-center rounded-lg px-4 py-2 text-sm font-medium" style="background: var(--color-accent); color: white">Continue</a>
-        <p v-if="session.can_enrol" class="text-[13px] mt-5 mb-2" style="color: var(--color-text-secondary)">
-          No passkey is set up yet. Create one so this works from your other devices too.
-        </p>
-        <button v-if="session.can_enrol" class="w-full rounded-lg px-4 py-2 text-sm font-medium border" :disabled="busy || !supported" style="border-color: var(--color-border)" @click="doEnrol">
-          Create a passkey
-        </button>
-      </template>
-
-      <template v-else-if="session && session.passkeys > 0">
-        <input
-          v-if="autofill" type="text" name="username" autocomplete="username webauthn" aria-label="Saved passkey"
-          placeholder="Tap here to use your saved passkey"
-          class="w-full rounded-lg px-3 py-2 text-sm mb-3 border" style="background: var(--color-bg); border-color: var(--color-border)"
-        >
-        <button class="w-full rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50" :disabled="busy || !supported" style="background: var(--color-accent); color: white" @click="doSignIn">
-          {{ busy ? 'Waiting for your passkey…' : 'Sign in with a passkey' }}
-        </button>
       </template>
 
       <template v-else>
-        <p class="text-[13px] mb-3">No passkey is set up yet, so the first one has to be created by someone who can prove they run this server.</p>
-
-        <ol class="text-[13px] space-y-3 mb-4 list-decimal pl-5">
-          <li>
-            On the computer that runs Cairn, run this and copy what it prints:
-            <span class="mt-1.5 flex items-center gap-2 rounded-lg px-3 py-2 font-mono text-[12px]" :style="{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }">
-              <code class="flex-1 select-all whitespace-nowrap overflow-x-auto">{{ command }}</code>
-              <button type="button" class="shrink-0 font-sans text-[12px] font-medium" style="color: var(--color-accent)" @click="copy">{{ copied ? 'Copied' : 'Copy' }}</button>
-            </span>
-            <span class="block mt-1 text-[12px]" style="color: var(--color-text-secondary)">The code is a file called <code>bootstrap-code</code> in Cairn's data folder. Anyone who can read it already controls the server.</span>
-          </li>
-          <li>
-            Paste it here, then create the passkey. Your password manager (1Password, iCloud Keychain, a security key) will offer to save it.
-            <input v-model="code" type="password" autocomplete="off" placeholder="One-time code" aria-label="One-time code" class="w-full rounded-lg px-3 py-2 text-sm mt-1.5 border" style="background: var(--color-bg); border-color: var(--color-border)">
-          </li>
-        </ol>
-
-        <button class="w-full rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50" :disabled="busy || !supported || !code.trim()" style="background: var(--color-accent); color: white" @click="doEnrol">
-          Create a passkey
-        </button>
-
-        <p v-if="session?.on_tailnet" class="text-[12px] mt-4" style="color: var(--color-text-secondary)">
-          This device is on a tailnet, but its Tailscale login is not on this server's allow list, so it was not recognised. Add the login to <code>NUXT_AUTH_TAILNET_USERS</code> to skip the code from this device, or use the code.
-        </p>
-        <p v-else class="text-[12px] mt-4" style="color: var(--color-text-secondary)">
-          No code is needed from an allowed device that reaches this page over your tailnet. If you are at home, the address you used probably arrived over the local network instead, which is why you are seeing this.
-        </p>
+        <form @submit.prevent="doLogin">
+          <input
+            v-model="passphrase"
+            type="password"
+            autocomplete="current-password"
+            placeholder="Passphrase"
+            aria-label="Passphrase"
+            class="w-full rounded-lg px-3 py-2 text-sm mb-3 border"
+            style="background: var(--color-bg); border-color: var(--color-border)"
+          >
+          <button
+            type="submit"
+            class="w-full rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50"
+            :disabled="busy"
+            style="background: var(--color-accent); color: white"
+          >
+            {{ busy ? 'Signing in...' : 'Sign in' }}
+          </button>
+        </form>
       </template>
 
-      <p v-if="!supported" class="text-[13px] mt-3" style="color: var(--color-danger, #f87171)">This browser cannot use passkeys here. Passkeys need a secure (https) address.</p>
       <p v-if="error" role="alert" class="text-[13px] mt-3" style="color: var(--color-danger, #f87171)">{{ error }}</p>
     </div>
   </div>

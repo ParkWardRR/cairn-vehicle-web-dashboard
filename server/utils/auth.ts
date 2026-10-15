@@ -10,7 +10,7 @@ import { bearerToken, clientIp, parseList, tailnetLogin, trustsProxy } from './a
 //   passkey  a session started by a WebAuthn assertion; the only kind that can be "fresh"
 export interface Identity {
   actor: string
-  method: 'service' | 'tailnet' | 'passkey'
+  method: 'service' | 'tailnet' | 'passkey' | 'passphrase'
   readOnly: boolean
   // Passkey authentication within the last FRESH_MS; secrets-bearing routes need it.
   fresh: boolean
@@ -105,7 +105,7 @@ export async function resolveIdentity(event: H3Event): Promise<Identity | null> 
   const cookie = getCookie(event, SESSION_COOKIE)
   if (cookie) {
     const s = authStore().session(cookie)
-    if (s) return { actor: s.actor, method: 'passkey', readOnly: false, fresh: Date.now() - s.auth_at <= FRESH_MS }
+    if (s) return { actor: s.actor, method: s.method, readOnly: false, fresh: Date.now() - s.auth_at <= FRESH_MS }
   }
 
   const login = await tailnetIdentity(event)
@@ -118,7 +118,7 @@ export async function resolveIdentity(event: H3Event): Promise<Identity | null> 
 export function requireFresh(event: H3Event): Identity {
   const id = event.context.cairnIdentity as Identity | undefined
   if (!id) throw createError({ statusCode: 401, statusMessage: 'authentication required' })
-  if (id.method !== 'passkey' || !id.fresh) throw createError({ statusCode: 401, statusMessage: 'reauth_required' })
+  if ((id.method !== 'passkey' && id.method !== 'passphrase') || !id.fresh) throw createError({ statusCode: 401, statusMessage: 'reauth_required' })
   return id
 }
 

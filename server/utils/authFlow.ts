@@ -49,11 +49,11 @@ export function sameSecret(a: unknown, b: string | null): boolean {
   return x.length === y.length && timingSafeEqual(x, y)
 }
 
-export function startSession(event: H3Event, actor: string, credentialId: string | null): void {
+export function startSession(event: H3Event, actor: string, credentialId: string | null, method: 'passkey' | 'passphrase' = 'passkey'): void {
   const days = Number(useRuntimeConfig().authSessionDays) || 30
   const old = getCookie(event, SESSION_COOKIE)
   if (old) authStore().endSession(old)
-  const token = authStore().createSession(actor, days, credentialId)
+  const token = authStore().createSession(actor, days, credentialId, method)
   setCookie(event, SESSION_COOKIE, token, {
     httpOnly: true, sameSite: 'strict', secure: isHttps(event), path: '/', maxAge: days * 86_400,
   })

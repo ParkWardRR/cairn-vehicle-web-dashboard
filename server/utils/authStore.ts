@@ -19,7 +19,7 @@ export interface Credential {
 
 export interface Session {
   actor: string
-  method: 'passkey'
+  method: 'passkey' | 'passphrase'
   created_at: number
   auth_at: number
   expires_at: number
@@ -54,6 +54,7 @@ export class AuthStore {
     this.db = new DatabaseSync(file)
     this.db.exec('PRAGMA journal_mode=WAL')
     this.db.exec(SCHEMA)
+    try { this.db.exec("ALTER TABLE sessions ADD COLUMN method TEXT NOT NULL DEFAULT 'passkey'") } catch { /* column already exists */ }
     try { chmodSync(file, 0o600) } catch { /* best effort on exotic filesystems */ }
   }
 
@@ -89,10 +90,10 @@ export class AuthStore {
     return Number(this.db.prepare('DELETE FROM credentials WHERE id=?').run(id).changes) > 0
   }
 
-  createSession(actor: string, days: number, credentialId: string | null = null, now = Date.now()): string {
+  createSession(actor: string, days: number, credentialId: string | null = null, method: Session['method'] = 'passkey', now = Date.now()): string {
     const token = randomBytes(32).toString('base64url')
-    this.db.prepare('INSERT INTO sessions (token_hash, actor, created_at, auth_at, expires_at, credential_id) VALUES (?,?,?,?,?,?)')
-      .run(hashToken(token), actor, now, now, now + days * 86_400_000, credentialId)
+    this.db.prepare('INSERT INTO sessions (token_hash, actor, created_at, auth_at, expires_at, credential_id, method) VALUES (?,?,?,?,?,?,?)')
+      .run(hashToken(token), actor, now, now, now + days * 86_400_000, credentialId, method)
     this.db.prepare('DELETE FROM sessions WHERE expires_at < ?').run(now)
     return token
   }
@@ -100,7 +101,7 @@ export class AuthStore {
   session(token: string, now = Date.now()): Session | null {
     const r = this.db.prepare('SELECT * FROM sessions WHERE token_hash=?').get(hashToken(token)) as any
     if (!r || r.expires_at < now) return null
-    return { actor: r.actor, method: 'passkey', created_at: r.created_at, auth_at: r.auth_at, expires_at: r.expires_at }
+    return { actor: r.actor, method: r.method ?? 'passkey', created_at: r.created_at, auth_at: r.auth_at, expires_at: r.expires_at }
   }
 
   endSession(token: string): void {
