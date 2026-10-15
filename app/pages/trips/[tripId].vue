@@ -32,6 +32,13 @@ interface TripSummary {
   last_obd_ms: number | null
   first_pos_ms: number | null
   first_fix_ms: number | null
+  // The same moments on the trip's clock: what the page compares and plots. The *_ms ones above
+  // are bare mono_ms, which restarts at every boot of the trip.
+  clock?: 'wall' | 'mono'
+  first_obd_t_ms?: number | null
+  last_obd_t_ms?: number | null
+  first_pos_t_ms?: number | null
+  first_fix_t_ms?: number | null
   prev_end: { lat: number; lon: number; observed_at: string } | null
 }
 
@@ -68,6 +75,8 @@ interface TripStop {
   start_offset_s: number
   start_mono_ms: number
   end_mono_ms: number
+  start_t_ms?: number
+  end_t_ms?: number
   duration_s: number
   lat: number
   lon: number
@@ -203,9 +212,23 @@ function fmtMs(ms: number): string {
   return `${Math.floor(sec / 60)}m ${Math.round(sec % 60)}s`
 }
 
+// The trip's own moments on its clock. Bare mono_ms (first_obd_ms and friends) restarts at every
+// boot, so on a trip that spans boots its min and max came from different boots.
+const tripMoments = computed(() => {
+  const t = trip.value
+  if (!t) return null
+  const onClock = t.first_obd_t_ms !== undefined
+  return {
+    first_obd_ms: onClock ? t.first_obd_t_ms ?? null : t.first_obd_ms,
+    last_obd_ms: onClock ? t.last_obd_t_ms ?? null : t.last_obd_ms,
+    first_fix_ms: onClock ? t.first_fix_t_ms ?? null : t.first_fix_ms,
+  }
+})
+
 const gpsAcq = computed(() => {
-  if (!trip.value) return null
-  const { first_obd_ms, last_obd_ms, first_fix_ms, duration_s, prev_end } = trip.value
+  if (!trip.value || !tripMoments.value) return null
+  const { prev_end } = trip.value
+  const { first_obd_ms, last_obd_ms, first_fix_ms } = tripMoments.value
   if (first_obd_ms == null || last_obd_ms == null) return null
 
   const totalMs = last_obd_ms - first_obd_ms
@@ -301,12 +324,6 @@ const scrubPos = ref<{ lat: number; lon: number } | null>(null)
 const previewPos = ref<{ lat: number; lon: number } | null>(null)
 const timelineHighlight = computed(() => previewPos.value ?? scrubPos.value)
 
-// Wall-clock ms at mono_ms = 0, rebuilt from any stop that has a real timestamp.
-const wallBaseMs = computed(() => {
-  const s = stops.value.find(x => x.start_at)
-  return s ? Date.parse(s.start_at!) - s.start_mono_ms : null
-})
-
 function selectStop(i: number) {
   selectedStop.value = i
 }
@@ -314,7 +331,7 @@ function selectStop(i: number) {
 // Choosing a stop from the list also jumps the scrubber to it.
 watch(selectedStop, (i) => {
   const s = i == null ? null : stops.value[i]
-  if (s) playhead.value = s.start_mono_ms
+  if (s) playhead.value = s.start_t_ms ?? s.start_mono_ms
 })
 const hasValidRoute = computed(() => {
   return coordinates.value.filter(c => c[0] !== 0 && c[1] !== 0).length >= 2
@@ -364,7 +381,7 @@ function insightIcon(icon: string | undefined): string {
     <!-- Header -->
     <LayoutPageHeader title="Trip" :subtitle="trip ? formatDate(trip.start?.observed_at) : 'Loading this drive…'">
       <template #actions>
-        <TripsTripImageButton :boot-id="tripId" />
+        <TripsTripImageButton :trip-id="tripId" />
         <NuxtLink
           to="/trips"
           class="inline-flex items-center gap-2 px-3.5 py-2 text-[13px] font-medium rounded-xl transition-colors hover:bg-[var(--color-surface-elevated)]"
@@ -393,7 +410,7 @@ function insightIcon(icon: string | undefined): string {
         <DataStatCard label="Max Speed" :value="maxSpeedMph != null ? `${maxSpeedMph}` : '--'" subtitle="mph" />
       </div>
 
-      <TripsTripMarks :boot-id="tripId" />
+      <TripsTripMarks :trip-id="tripId" />
 
       <!-- Fuel economy -->
       <div v-if="fuel" class="mb-6">
@@ -445,8 +462,8 @@ function insightIcon(icon: string | undefined): string {
               :headings="headings"
               :accuracies="accuracies"
               :sats="sats"
-              :first-obd-ms="trip?.first_obd_ms"
-              :first-fix-ms="trip?.first_fix_ms"
+              :first-obd-ms="tripMoments?.first_obd_ms"
+              :first-fix-ms="tripMoments?.first_fix_ms"
               :prev-end="trip?.prev_end"
               :highlight-pos="timelineHighlight"
               :stops="stops"
@@ -475,11 +492,10 @@ function insightIcon(icon: string | undefined): string {
           <ChartsTripScrubber
             v-if="hasValidRoute"
             v-model="playhead"
-            :boot-id="tripId"
+            :trip-id="tripId"
             :stops="stops"
             :selected-stop="selectedStop"
-            :wall-base-ms="wallBaseMs"
-            :first-fix-ms="trip?.first_fix_ms"
+            :first-fix-ms="tripMoments?.first_fix_ms"
             @position="scrubPos = $event ? { lat: $event.lat, lon: $event.lon } : null"
             @hover="previewPos = $event ? { lat: $event.lat, lon: $event.lon } : null"
             @select-stop="selectStop"
@@ -570,14 +586,14 @@ function insightIcon(icon: string | undefined): string {
       <!-- Interactive timeline + GPS health -->
       <div class="mb-4">
         <ClientOnly>
-          <ChartsTripTimeline :boot-id="tripId" :first-obd-ms="trip?.first_obd_ms" />
+          <ChartsTripTimeline :trip-id="tripId" :first-obd-ms="tripMoments?.first_obd_ms" />
           <template #fallback>
             <div class="skeleton rounded-xl" style="height: 180px" />
           </template>
         </ClientOnly>
       </div>
 
-      <TripsGpsCompare :boot-id="tripId" />
+      <TripsGpsCompare :trip-id="tripId" />
 
       <!-- Speed / Elevation sparkline -->
       <div class="rounded-xl p-4 mb-6" :style="{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }">

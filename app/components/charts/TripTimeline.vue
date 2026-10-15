@@ -4,8 +4,12 @@ import VChart from 'vue-echarts'
 
 // GPS health for a trip: satellites in use over time, shaded where there was a
 // fix. The trip's scrubber lives in TripScrubber, directly under the map.
+//
+// Plotted on the trip's clock, `t_ms` from the timeline API, not on mono_ms: a trip can span boots
+// and mono_ms restarts at each, which drew every boot over the first.
 
 interface GPSSample {
+  t_ms?: number | null
   mono_ms: number
   lat: number
   lon: number
@@ -14,6 +18,7 @@ interface GPSSample {
 
 const props = defineProps<{
   tripId: string
+  // The trip's first OBD sample, on the trip's clock (the trip's first_obd_t_ms).
   firstObdMs?: number | null
 }>()
 
@@ -21,8 +26,10 @@ const { data: timeline } = useFetch<{ gps: GPSSample[] }>(
   () => `/api/trips/${props.tripId}/timeline`,
 )
 
-const gps = computed(() => timeline.value?.gps ?? [])
+const gps = computed(() => onTripClock(timeline.value?.gps))
 const gpsWithFix = computed(() => gps.value.filter(g => g.lat !== 0 && g.lon !== 0))
+
+const GAP_MS = 30_000
 
 function fmtMs(ms: number): string {
   const sec = ms / 1000
@@ -32,15 +39,10 @@ function fmtMs(ms: number): string {
 
 const satsChartOption = computed(() => {
   if (!gps.value.length) return {}
-  const startMs = props.firstObdMs ?? gps.value[0]?.mono_ms ?? 0
-  const data = gps.value.map(g => [
-    Math.round((g.mono_ms - startMs) / 1000),
-    g.sats_used ?? 0,
-  ])
-  const fixData = gps.value.map(g => [
-    Math.round((g.mono_ms - startMs) / 1000),
-    (g.lat !== 0 && g.lon !== 0) ? 1 : 0,
-  ])
+  // From the trip's start: its first OBD sample, or its first GPS row if that came earlier.
+  const startMs = Math.min(props.firstObdMs ?? Infinity, gps.value[0]?.t ?? Infinity)
+  // A silence (parked between two boots of the trip, or the receiver off) breaks the lines.
+  const { sats: data, fix: fixData } = gpsHealthSeries(gps.value, startMs, GAP_MS)
 
   return {
     backgroundColor: 'transparent',
@@ -60,6 +62,7 @@ const satsChartOption = computed(() => {
     xAxis: {
       type: 'value',
       min: 0,
+      max: 'dataMax',
       axisLabel: { color: '#8b90a0', fontSize: 10, formatter: (v: number) => `${Math.floor(v / 60)}m` },
       axisLine: { lineStyle: { color: '#2e3347' } },
       splitLine: { show: false },

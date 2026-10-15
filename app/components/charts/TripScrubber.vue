@@ -2,23 +2,30 @@
 // A video-style scrubber for a trip: drag or click to jump anywhere in it, press
 // play to watch the car drive the route. The track shows speed over time, the
 // stretch before the first GPS fix, and every stop; the map follows the playhead.
+//
+// Everything here is placed on the trip's clock, `t_ms` from the timeline API (wall-clock ms, or
+// mono_ms for a trip with no UTC basis), never on mono_ms: a trip can span boots, mono_ms restarts
+// at each, and seeking on it would fold the later boots back over the first.
 
-interface OBDSample {
+// What the timeline API sends: each row's time on the trip's clock, and its own mono_ms.
+interface Timed {
+  t_ms?: number | null
   mono_ms: number
+}
+
+interface OBDSample extends Timed {
   speed_kph: number
   rpm: number
   coolant_c: number | null
   throttle_pct: number | null
 }
 
-interface BoostSample {
-  mono_ms: number
+interface BoostSample extends Timed {
   boost_psi: number | null
   lambda_ratio: number | null
 }
 
-interface GPSSample {
-  mono_ms: number
+interface GPSSample extends Timed {
   lat: number
   lon: number
   speed_mps: number | null
@@ -28,6 +35,9 @@ interface GPSSample {
 interface ScrubStop {
   start_mono_ms: number
   end_mono_ms: number
+  // the stop on the trip's clock; absent only from an older server, which had no other
+  start_t_ms?: number
+  end_t_ms?: number
   category: StopCategory
   inferred: boolean
   place?: { name: string | null } | null
@@ -37,37 +47,41 @@ const props = defineProps<{
   tripId: string
   stops?: ScrubStop[]
   selectedStop?: number | null
-  // The playhead, in the trip's monotonic milliseconds.
+  // The playhead, on the trip's clock (t_ms).
   modelValue: number | null
-  // Wall-clock ms at mono_ms = 0, when the trip has a trustworthy UTC basis.
-  wallBaseMs?: number | null
+  // The trip's first GPS fix, on the trip's clock (the trip's first_fix_t_ms).
   firstFixMs?: number | null
 }>()
 
 const emit = defineEmits<{
   'update:modelValue': [ms: number]
-  position: [pos: { lat: number; lon: number; mono_ms: number } | null]
-  hover: [pos: { lat: number; lon: number; mono_ms: number } | null]
+  position: [pos: { lat: number; lon: number; t_ms: number } | null]
+  hover: [pos: { lat: number; lon: number; t_ms: number } | null]
   'select-stop': [index: number]
   playing: [playing: boolean]
 }>()
 
-const { data: timeline } = useFetch<{ obd: OBDSample[]; boost: BoostSample[]; gps: GPSSample[] }>(
+const { data: timeline } = useFetch<{ clock?: 'wall' | 'mono'; obd: OBDSample[]; boost: BoostSample[]; gps: GPSSample[] }>(
   () => `/api/trips/${props.tripId}/timeline`,
 )
 
-const obd = computed(() => timeline.value?.obd ?? [])
-const boost = computed(() => timeline.value?.boost ?? [])
-const fixes = computed(() => (timeline.value?.gps ?? []).filter(g => g.lat !== 0 && g.lon !== 0))
+// Each series with `t`, its time on the trip's clock, in that order (shared/utils/tripTimeline.ts).
+const obd = computed(() => onTripClock(timeline.value?.obd))
+const boost = computed(() => onTripClock(timeline.value?.boost))
+const gps = computed(() => onTripClock(timeline.value?.gps))
+const fixes = computed(() => gps.value.filter(g => g.lat !== 0 && g.lon !== 0))
+
+const stopStart = (s: ScrubStop) => s.start_t_ms ?? s.start_mono_ms
+const stopEnd = (s: ScrubStop) => s.end_t_ms ?? s.end_mono_ms
 
 // ---- time range ----
 
 const startMs = computed(() => {
-  const xs = [obd.value[0]?.mono_ms, boost.value[0]?.mono_ms, timeline.value?.gps?.[0]?.mono_ms].filter((x): x is number => x != null)
+  const xs = [obd.value[0]?.t, boost.value[0]?.t, gps.value[0]?.t].filter((x): x is number => x != null)
   return xs.length ? Math.min(...xs) : 0
 })
 const endMs = computed(() => {
-  const xs = [obd.value.at(-1)?.mono_ms, boost.value.at(-1)?.mono_ms, timeline.value?.gps?.at(-1)?.mono_ms].filter((x): x is number => x != null)
+  const xs = [obd.value.at(-1)?.t, boost.value.at(-1)?.t, gps.value.at(-1)?.t].filter((x): x is number => x != null)
   return xs.length ? Math.max(...xs) : 1
 })
 const duration = computed(() => Math.max(1, endMs.value - startMs.value))
@@ -76,39 +90,11 @@ const pct = (ms: number) => Math.max(0, Math.min(100, ((ms - startMs.value) / du
 
 // ---- lookups ----
 
-// Index of the last element at or before ms, or -1.
-function floorIndex<T extends { mono_ms: number }>(arr: T[], ms: number): number {
-  let lo = 0
-  let hi = arr.length - 1
-  let ans = -1
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1
-    if (arr[mid].mono_ms <= ms) { ans = mid; lo = mid + 1 } else hi = mid - 1
-  }
-  return ans
-}
+const nearest = tripNearest
 
-function nearest<T extends { mono_ms: number }>(arr: T[], ms: number, within = 10_000): T | null {
-  if (!arr.length) return null
-  const i = floorIndex(arr, ms)
-  const cands = [arr[i], arr[i + 1]].filter(Boolean) as T[]
-  let best: T | null = null
-  for (const c of cands) if (!best || Math.abs(c.mono_ms - ms) < Math.abs(best.mono_ms - ms)) best = c
-  return best && Math.abs(best.mono_ms - ms) <= within ? best : null
-}
-
-// Where the car was at ms. Fixes close together are interpolated; across a long
-// silence the car is held at its last fix (it was parked or the receiver was
-// out). Before the first fix there is no position.
+// Where the car was at ms: interpolated between close fixes, held at the last one across a silence.
 function positionAt(ms: number): { lat: number; lon: number } | null {
-  const f = fixes.value
-  if (!f.length || ms < f[0].mono_ms) return null
-  const i = floorIndex(f, ms)
-  const a = f[i]
-  const b = f[i + 1]
-  if (!b || b.mono_ms - a.mono_ms > 30_000) return { lat: a.lat, lon: a.lon }
-  const k = (ms - a.mono_ms) / (b.mono_ms - a.mono_ms)
-  return { lat: a.lat + (b.lat - a.lat) * k, lon: a.lon + (b.lon - a.lon) * k }
+  return tripPositionAt(fixes.value, ms)
 }
 
 function speedMphAt(ms: number): number | null {
@@ -143,7 +129,7 @@ const trace = computed(() => {
   const peaks: Array<number | null> = new Array(BUCKETS).fill(null)
   for (const g of fixes.value) {
     if (g.speed_mps == null) continue
-    const i = Math.min(BUCKETS - 1, Math.floor(((g.mono_ms - startMs.value) / duration.value) * BUCKETS))
+    const i = Math.min(BUCKETS - 1, Math.floor(((g.t - startMs.value) / duration.value) * BUCKETS))
     peaks[i] = Math.max(peaks[i] ?? 0, g.speed_mps)
   }
   const max = Math.max(5, ...peaks.filter((x): x is number => x != null))
@@ -185,7 +171,7 @@ function setT(ms: number, silent = false) {
 watch(t, (ms) => {
   if (ms == null) { emit('position', null); return }
   const p = positionAt(ms)
-  emit('position', p ? { ...p, mono_ms: ms } : null)
+  emit('position', p ? { ...p, t_ms: ms } : null)
 })
 
 // ---- playback ----
@@ -256,7 +242,7 @@ function onMove(e: PointerEvent) {
   hoverMs.value = ms
   if (dragging.value) { setT(ms); return }
   const p = positionAt(ms)
-  emit('hover', p ? { ...p, mono_ms: ms } : null)
+  emit('hover', p ? { ...p, t_ms: ms } : null)
 }
 
 function onUp(e: PointerEvent) {
@@ -282,7 +268,7 @@ function seekStop(i: number) {
   const s = props.stops?.[i]
   if (!s) return
   emit('select-stop', i)
-  setT(s.start_mono_ms)
+  setT(stopStart(s))
 }
 
 // ---- formatting ----
@@ -295,9 +281,10 @@ function fmtElapsed(ms: number): string {
   return h ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}` : `${m}:${String(sec).padStart(2, '0')}`
 }
 
+// The time of day at ms, when the trip's clock is the wall clock.
 function fmtWall(ms: number): string | null {
-  if (props.wallBaseMs == null) return null
-  return new Date(props.wallBaseMs + ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit' })
+  if (timeline.value?.clock !== 'wall') return null
+  return new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit' })
 }
 
 const blindPct = computed(() => {
@@ -308,7 +295,7 @@ const blindPct = computed(() => {
 const ticks = computed(() => [0, 0.25, 0.5, 0.75, 1].map(k => ({ k, label: fmtElapsed(startMs.value + k * duration.value) })))
 
 function stopLabel(s: ScrubStop): string {
-  const mins = Math.round((s.end_mono_ms - s.start_mono_ms) / 60000)
+  const mins = Math.round((stopEnd(s) - stopStart(s)) / 60000)
   return `${STOP_LABEL[s.category]} stop · ${mins} min${s.place?.name ? ` · ${s.place.name}` : ''}`
 }
 </script>
@@ -400,8 +387,8 @@ function stopLabel(s: ScrubStop): string {
           type="button"
           class="absolute bottom-0 h-3.5 rounded-t-[3px] pointer-events-auto transition-[filter]"
           :style="{
-            left: pct(s.start_mono_ms) + '%',
-            width: `max(6px, ${pct(s.end_mono_ms) - pct(s.start_mono_ms)}%)`,
+            left: pct(stopStart(s)) + '%',
+            width: `max(6px, ${pct(stopEnd(s)) - pct(stopStart(s))}%)`,
             background: STOP_COLOR[s.category],
             opacity: s.inferred ? 0.65 : 1,
             outline: selectedStop === i ? '2px solid #fff' : 'none',

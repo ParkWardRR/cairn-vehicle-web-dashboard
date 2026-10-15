@@ -9,8 +9,11 @@
  * Everything downstream therefore filters on a vehicle and a time range instead of
  * a boot. That also means `ORDER BY mono_ms` is wrong for a trip: the monotonic
  * clock restarts at every boot, so two legs of one outing would interleave. Order
- * by `observed_at` and keep `mono_ms` only as a tie-break inside one boot.
+ * by `observed_at` and keep `mono_ms` only as a tie-break inside one boot; place a
+ * sample in time with `TripScope.time()`, never with bare `mono_ms`.
  */
+import { type TripClockKind, wallClockMs } from '../../shared/utils/tripClock'
+
 export interface TripScope {
   tripId: string
   vehicleId: string
@@ -25,6 +28,17 @@ export interface TripScope {
    * Pass the alias when the query joins more than one table.
    */
   where(alias?: string): string
+  /**
+   * The clock the trip's samples are placed on: 'wall' when the trip has a UTC basis, 'mono'
+   * when none of it does (it is dated 1970). See shared/utils/tripClock.ts.
+   */
+  clock: TripClockKind
+  /**
+   * SQL for a row's time on that clock, in ms: `epoch_ms(observed_at)`, or `mono_ms` for a trip
+   * with no wall clock. What a chart plots, a scrubber seeks or two series are paired on; never
+   * bare mono_ms, which restarts at every boot of the trip.
+   */
+  time(alias?: string): string
 }
 
 /**
@@ -72,6 +86,10 @@ export function makeTripScope(
   const vehicleSql = sqlString(vehicleId)
   const startSql = `TIMESTAMP ${sqlString(startedAt)}`
   const endSql = `TIMESTAMP ${sqlString(endedAt)}`
+  // ended_at is the trip's last row: if that has no wall clock, none of the trip does.
+  // (resolveTrip formats it as a bare UTC 'YYYY-MM-DD HH:MM:SS.mmm'.)
+  const endIso = /(?:[zZ]|[+-]\d\d:?\d\d)$/.test(endedAt) ? endedAt : `${endedAt.trim().replace(' ', 'T')}Z`
+  const clock: TripClockKind = wallClockMs(endIso) != null ? 'wall' : 'mono'
   return {
     tripId,
     vehicleId,
@@ -83,6 +101,11 @@ export function makeTripScope(
     where(alias?: string) {
       const p = alias ? `${alias}.` : ''
       return `${p}vehicle_id = ${vehicleSql} AND ${p}observed_at BETWEEN ${startSql} AND ${endSql}`
+    },
+    clock,
+    time(alias?: string) {
+      const p = alias ? `${alias}.` : ''
+      return clock === 'wall' ? `epoch_ms(${p}observed_at)` : `${p}mono_ms`
     },
   }
 }

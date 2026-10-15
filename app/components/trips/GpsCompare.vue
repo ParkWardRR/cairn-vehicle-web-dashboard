@@ -106,8 +106,11 @@ const findings = computed<string[]>(() => {
 const chartOption = computed(() => {
   const series = c.value?.pairs.series ?? []
   if (series.length < 2) return null
-  const t0 = series[0].mono_ms
-  const x = (s: { mono_ms: number }) => Math.round((s.mono_ms - t0) / 1000)
+  // Seconds into the comparison on the trip's clock (t_ms), not mono_ms: a trip can span boots and
+  // mono_ms restarts at each. (mono_ms is the fallback for an older server that sent no t_ms.)
+  const at = (s: { t_ms?: number; mono_ms: number }) => s.t_ms ?? s.mono_ms
+  const t0 = at(series[0])
+  const x = (s: { t_ms?: number; mono_ms: number }) => Math.round((at(s) - t0) / 1000)
   return {
     backgroundColor: 'transparent',
     animation: false,

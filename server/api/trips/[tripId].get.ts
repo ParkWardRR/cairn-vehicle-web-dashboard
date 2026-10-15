@@ -34,7 +34,11 @@ export default defineEventHandler(async (event) => {
         (SELECT min(mono_ms) FROM obd WHERE ${trip.where()}) AS first_obd_ms,
         (SELECT max(mono_ms) FROM obd WHERE ${trip.where()}) AS last_obd_ms,
         (SELECT min(mono_ms) FROM ${tripPositions(trip)}) AS first_pos_ms,
-        (SELECT min(mono_ms) FROM ${tripPositions(trip)} WHERE lat != 0 AND lon != 0) AS first_fix_ms
+        (SELECT min(mono_ms) FROM ${tripPositions(trip)} WHERE lat != 0 AND lon != 0) AS first_fix_ms,
+        (SELECT min(${trip.time()}) FROM obd WHERE ${trip.where()}) AS first_obd_t_ms,
+        (SELECT max(${trip.time()}) FROM obd WHERE ${trip.where()}) AS last_obd_t_ms,
+        (SELECT min(${trip.time()}) FROM ${tripPositions(trip)}) AS first_pos_t_ms,
+        (SELECT min(${trip.time()}) FROM ${tripPositions(trip)} WHERE lat != 0 AND lon != 0) AS first_fix_t_ms
     `),
     // Where this car last parked before this trip, so the detail page can draw the
     // gap between trips. The previous TRIP, not the previous boot: a boot boundary
@@ -80,6 +84,14 @@ export default defineEventHandler(async (event) => {
     last_obd_ms: fd.last_obd_ms ?? null,
     first_pos_ms: fd.first_pos_ms ?? null,
     first_fix_ms: fd.first_fix_ms ?? null,
+    // The same four moments on the trip's clock (TripScope.time(); `clock` says which), which is
+    // what the page compares and plots. The *_ms figures above are bare mono_ms, which restarts at
+    // every boot: on a trip that spans boots their min and max come from different boots.
+    clock: trip.clock,
+    first_obd_t_ms: fd.first_obd_t_ms ?? null,
+    last_obd_t_ms: fd.last_obd_t_ms ?? null,
+    first_pos_t_ms: fd.first_pos_t_ms ?? null,
+    first_fix_t_ms: fd.first_fix_t_ms ?? null,
     prev_end: prevTrip[0] ?? null,
   }
 })

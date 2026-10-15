@@ -18,7 +18,7 @@ export default defineEventHandler(async (event) => {
         AND b.maf_cgps IS NOT NULL AND b.lambda_ratio IS NOT NULL
         AND b.lambda_ratio > 0.7 AND b.lambda_ratio < 1.3
         AND o.speed_kph IS NOT NULL
-      ORDER BY b.mono_ms
+      ORDER BY b.observed_at, b.mono_ms
     `),
     // Each step is capped: the device logs sparsely while parked, so a long
     // silence between two fixes must not be counted as driving at the last speed. Steps are

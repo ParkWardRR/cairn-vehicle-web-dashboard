@@ -559,6 +559,40 @@ describe('representative data (synthetic demo store)', () => {
     for (const series of ['obd', 'boost', 'gps']) expect(tl.body[series].length).toBeGreaterThan(0)
   })
 
+  it('places a trip that spans boots on one clock, so its charts run in time order', async () => {
+    // The demo store's longest trip spans two boots, and mono_ms restarts at the second.
+    const p = { tripId: trip.trip_id }
+    const tl = await GET(DATA, '/api/trips/:tripId/timeline', { params: p })
+    expect(tl.body.clock).toBe('wall')
+    for (const series of ['obd', 'boost', 'gps']) {
+      const rows = tl.body[series]
+      let monoRestarts = 0
+      for (let i = 1; i < rows.length; i++) {
+        expect(rows[i].t_ms).toBeGreaterThanOrEqual(rows[i - 1].t_ms)
+        if (rows[i].mono_ms < rows[i - 1].mono_ms) monoRestarts++
+      }
+      expect(monoRestarts, `${series} spans a boot`).toBeGreaterThan(0)
+      // the series covers the trip, not one boot's share of it
+      expect(rows.at(-1).t_ms - rows[0].t_ms).toBeGreaterThan(trip.duration_ms * 0.9)
+    }
+
+    const one = (await GET(DATA, '/api/trips/:tripId', { params: p })).body
+    expect(one.clock).toBe('wall')
+    expect(one.first_obd_t_ms).toBe(tl.body.obd[0].t_ms)
+    expect(one.last_obd_t_ms).toBe(tl.body.obd.at(-1).t_ms)
+    expect(one.first_fix_t_ms).toBeGreaterThanOrEqual(one.first_pos_t_ms)
+
+    const stops = (await GET(DATA, '/api/trips/:tripId/stops', { params: p })).body.stops
+    for (const s of stops) {
+      expect(s.end_t_ms).toBeGreaterThanOrEqual(s.start_t_ms)
+      expect(between(s.start_t_ms, tl.body.gps[0].t_ms, tl.body.gps.at(-1).t_ms)).toBe(true)
+    }
+
+    const cmp = (await GET(DATA, '/api/trips/:tripId/gps-compare', { params: p })).body
+    expect(cmp.clock).toBe('wall')
+    expect(cmp.span_s * 1000).toBeGreaterThan(trip.duration_ms * 0.9)
+  })
+
   it('dashboard totals agree with the trip list', async () => {
     const stats = await GET(DATA, '/api/dashboard/stats')
     expect(stats.status).toBe(200)
