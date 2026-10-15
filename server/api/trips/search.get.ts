@@ -57,7 +57,7 @@ export default defineEventHandler(async (event) => {
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : ''
 
   const base = `
-    FROM v_drive_summary d
+    FROM v_trip_summary d
     LEFT JOIN (
       SELECT vehicle_id, boot_id, observed_at, lat, lon
       FROM (SELECT *, row_number() OVER (PARTITION BY vehicle_id, boot_id ORDER BY mono_ms ASC) AS rn FROM position${v.where()}) WHERE rn = 1

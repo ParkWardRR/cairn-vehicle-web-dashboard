@@ -1,9 +1,11 @@
 <script setup lang="ts">
 interface Trip {
+  trip_id: string
   boot_id: string
   start_time: string
-  duration_s: number
-  max_speed_kph: number
+  duration_ms: number
+  driving_ms: number | null
+  max_obd_speed_kph: number
   max_rpm: number
   obd_samples: number
   gap_count: number
@@ -122,8 +124,8 @@ function formatDuration(seconds: number | null): string {
               <span v-for="t in trip.annotation?.tags ?? []" :key="t" class="ml-1.5 text-[11px] px-2 py-0.5 rounded-full" :style="{ background: 'var(--color-surface-elevated)', border: '1px solid var(--color-border)' }">{{ t }}</span>
               <span v-if="trip.annotation?.note" class="block text-[12px] mt-0.5 truncate max-w-md" style="color: var(--color-text-secondary)">{{ trip.annotation.note }}</span>
             </td>
-            <td class="px-5 py-3.5 font-mono text-[13px]">{{ formatDuration(trip.duration_s) }}</td>
-            <td class="px-5 py-3.5 font-mono text-[13px] text-right">{{ Math.round(trip.max_speed_kph / 1.60934) }} <span class="text-[11px]" style="color: var(--color-text-secondary)">mph</span></td>
+            <td class="px-5 py-3.5 font-mono text-[13px]">{{ formatDuration(trip.duration_ms / 1000) }}</td>
+            <td class="px-5 py-3.5 font-mono text-[13px] text-right">{{ Math.round(trip.max_obd_speed_kph / 1.60934) }} <span class="text-[11px]" style="color: var(--color-text-secondary)">mph</span></td>
             <td class="px-5 py-3.5 font-mono text-[13px] text-right hidden sm:table-cell">{{ trip.max_rpm.toLocaleString() }}</td>
             <td class="px-5 py-3.5 font-mono text-[13px] text-right hidden md:table-cell">{{ trip.obd_samples.toLocaleString() }}</td>
             <td class="px-5 py-3.5 font-mono text-[13px] text-right hidden md:table-cell">{{ trip.gap_count }}</td>
