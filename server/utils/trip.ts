@@ -88,6 +88,10 @@ export function makeTripScope(
  * holds both under the same boot (source_flags bit 5), and reading both would drive
  * the same road twice.
  *
+ * Fixes the store marks untrusted (v_position_trusted: the accelerometer or physics
+ * contradicts them) are left out, so a receiver's run after the car has parked never
+ * reaches a track, a stop or an endpoint. The raw rows stay in `position`.
+ *
  * The trip-scoped counterpart of primaryPositions(). The fallback is decided per
  * trip rather than per boot, which is the point: an outing whose first leg had no
  * fix but whose second did should use the dongle throughout, not switch sources
@@ -95,11 +99,11 @@ export function makeTripScope(
  */
 export function tripPositions(trip: TripScope): string {
   return `(
-    SELECT * FROM position
-    WHERE ${trip.where()}
+    SELECT * FROM v_position_trusted
+    WHERE ${trip.where()} AND trusted
       AND (coalesce(source_flags, 0) & 32 = 0
-           OR NOT EXISTS (SELECT 1 FROM position d
-                          WHERE ${trip.where('d')} AND coalesce(d.source_flags, 0) & 32 = 0
+           OR NOT EXISTS (SELECT 1 FROM v_position_trusted d
+                          WHERE ${trip.where('d')} AND d.trusted AND coalesce(d.source_flags, 0) & 32 = 0
                             AND d.lat != 0 AND d.lon != 0))
   ) AS pos`
 }

@@ -26,8 +26,8 @@ export default defineEventHandler(async (event) => {
 
   const raw = await queryTsdbObjects(`
     SELECT ${COLUMNS}
-    FROM position
-    WHERE ${trip.where()} AND lat != 0 AND lon != 0
+    FROM v_position_trusted
+    WHERE ${trip.where()} AND trusted AND lat != 0 AND lon != 0
     ORDER BY observed_at, mono_ms ASC
   `)
 

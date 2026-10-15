@@ -21,7 +21,7 @@ export default defineEventHandler(async (event) => {
   const lastPos = await queryTsdbObjects(`
     SELECT observed_at, lat, lon FROM ${tripPositions(trip)}
     WHERE ${trip.where()}
-    ORDER BY observed_at, mono_ms DESC LIMIT 1
+    ORDER BY observed_at DESC, mono_ms DESC LIMIT 1
   `)
 
   const [events, fixDelay, prevTrip] = await Promise.all([
