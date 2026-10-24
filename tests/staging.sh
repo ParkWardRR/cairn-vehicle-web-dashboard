@@ -135,7 +135,8 @@ if [ "$rc" -eq 0 ] && [ "$CAPTURE" = 1 ]; then
     // which id it names, so ids are normalised: the file then does not depend on the run.
     // Dates move with the clock (the demo store dates its trips from now), so they are normalised too.
     const zeros = "\x27" + "0".repeat(32) + "\x27"
-    const norm = (q) => q.replace(/\x27[0-9a-f]{32}\x27/g, zeros).replace(/\x27\d{4}-\d{2}-\d{2}[^\x27]*\x27/g, "\x272000-01-01\x27")
+    // Trip ids embed the trip start in ms, and the demo store dates its drives from now.
+    const norm = (q) => q.replace(/\x27[0-9a-f]{32}:[0-9]+\x27/g, "\x27" + "0".repeat(32) + ":0\x27").replace(/\x27[0-9a-f]{32}\x27/g, zeros).replace(/\x27\d{4}-\d{2}-\d{2}[^\x27]*\x27/g, "\x272000-01-01\x27")
     const sql = [...new Set(lines.map(l => norm(JSON.parse(l))))].sort()
     require("fs").writeFileSync(process.argv[2], JSON.stringify(sql, null, 1) + "\n")
     console.log("==> captured " + sql.length + " distinct statements into deploy/required-queries.json")
