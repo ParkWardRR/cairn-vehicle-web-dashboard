@@ -58,5 +58,7 @@ export default defineEventHandler(async () => {
     })),
     pending,
     attribution: attributionForResults(results),
+    // Wi-Fi positions: whether unknown networks are looked up in beaconDB.
+    wifi: wifiSettingsForApi(),
   }
 })

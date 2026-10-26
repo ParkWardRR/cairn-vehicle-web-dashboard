@@ -56,6 +56,10 @@ export default defineNuxtConfig({
     placesDataDir: '.data/places',
     overpassUrl: 'https://overpass-api.de/api/interpreter,https://overpass.private.coffee/api/interpreter',
     geoapifyKey: '',
+    // Wi-Fi positions for scans with no GNSS fix: unknown access points (BSSIDs and signal
+    // strengths only) are looked up in beaconDB unless NUXT_PLACES_BEACONDB=false or
+    // NUXT_PLACES_EXTERNAL=false. The owner can also turn it off on the Places page.
+    placesBeacondb: 'true',
     // Authentication. Every route and page needs an identity; NUXT_AUTH_MODE=off is for local
     // development only. An identity is a passkey session, an allowlisted Tailnet device, or the
     // read-only service token. Real values (logins, origins) live in /etc/cairn/ui.env.

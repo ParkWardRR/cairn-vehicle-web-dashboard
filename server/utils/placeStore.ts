@@ -53,7 +53,24 @@ CREATE TABLE IF NOT EXISTS place_visits (
   PRIMARY KEY (boot_id, kind, key_ms)
 );
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS wifi_lookups (
+  key TEXT NOT NULL, source TEXT NOT NULL,
+  found INTEGER NOT NULL,
+  lat REAL, lon REAL, accuracy_m REAL,
+  fetched_at INTEGER NOT NULL,
+  PRIMARY KEY (source, key)
+);
 `
+
+export interface WifiLookupRow {
+  key: string
+  source: string
+  found: boolean
+  lat: number | null
+  lon: number | null
+  accuracy_m: number | null
+  fetched_at: number
+}
 
 const M_PER_DEG_LAT = 110540
 
@@ -106,12 +123,32 @@ export class PlaceStore {
     }
   }
 
-  callsToday(source: PlaceSource, day: string): number {
+  // What a Wi-Fi lookup service said about one set of access points (the key is the
+  // set's sorted BSSIDs). found = 0 is a remembered "no idea", so the set is never
+  // sent again.
+  wifiLookup(source: string, key: string): WifiLookupRow | null {
+    const r = this.db.prepare('SELECT * FROM wifi_lookups WHERE source = ? AND key = ?').get(source, key) as any
+    return r ? { key: r.key, source: r.source, found: !!r.found, lat: r.lat, lon: r.lon, accuracy_m: r.accuracy_m, fetched_at: r.fetched_at } : null
+  }
+
+  saveWifiLookup(row: WifiLookupRow): void {
+    this.db.prepare(`INSERT INTO wifi_lookups (key, source, found, lat, lon, accuracy_m, fetched_at) VALUES (?,?,?,?,?,?,?)
+      ON CONFLICT(source, key) DO UPDATE SET found=excluded.found, lat=excluded.lat, lon=excluded.lon,
+        accuracy_m=excluded.accuracy_m, fetched_at=excluded.fetched_at`)
+      .run(row.key, row.source, row.found ? 1 : 0, row.lat, row.lon, row.accuracy_m, row.fetched_at)
+  }
+
+  wifiLookupCount(source: string): { found: number; none: number } {
+    const r = this.db.prepare('SELECT coalesce(sum(found), 0) AS f, count(*) AS n FROM wifi_lookups WHERE source = ?').get(source) as any
+    return { found: r.f, none: r.n - r.f }
+  }
+
+  callsToday(source: PlaceSource | 'beacondb', day: string): number {
     const r = this.db.prepare('SELECT n FROM source_calls WHERE day=? AND source=?').get(day, source) as any
     return r?.n ?? 0
   }
 
-  addCalls(source: PlaceSource, day: string, n: number): void {
+  addCalls(source: PlaceSource | 'beacondb', day: string, n: number): void {
     this.db.prepare(`INSERT INTO source_calls (day, source, n) VALUES (?,?,?)
       ON CONFLICT(day, source) DO UPDATE SET n = n + excluded.n`).run(day, source, n)
   }

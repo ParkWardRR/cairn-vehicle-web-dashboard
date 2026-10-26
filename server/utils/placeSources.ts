@@ -228,3 +228,53 @@ export function fsqCandidate(row: FsqRow, lat: number, lon: number): PlaceCandid
     dist_m: Math.round(distM(lat, lon, row.lat, row.lon)),
   }
 }
+
+// ---------- Forward geocoding (an address typed on the Places page) ----------
+
+export interface GeocodeResult {
+  label: string
+  lat: number
+  lon: number
+  source: 'osm' | 'geoapify'
+}
+
+export function parseNominatimSearch(json: unknown): GeocodeResult[] {
+  if (!Array.isArray(json)) return []
+  const out: GeocodeResult[] = []
+  for (const r of json) {
+    const lat = Number(r?.lat)
+    const lon = Number(r?.lon)
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || !r?.display_name) continue
+    out.push({ label: String(r.display_name), lat, lon, source: 'osm' })
+  }
+  return out
+}
+
+export function parseGeoapifySearch(json: any): GeocodeResult[] {
+  const out: GeocodeResult[] = []
+  for (const r of json?.results ?? []) {
+    const lat = Number(r?.lat)
+    const lon = Number(r?.lon)
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || !r?.formatted) continue
+    out.push({ label: String(r.formatted), lat, lon, source: 'geoapify' })
+  }
+  return out
+}
+
+// One search, sent only when a person asks. Geoapify when a key is set, otherwise
+// OpenStreetMap's Nominatim (whose policy allows an occasional search like this, with
+// an identifying User-Agent and at most one a second).
+export async function geocodeAddress(q: string, geoapifyKey: string): Promise<GeocodeResult[]> {
+  if (geoapifyKey) {
+    return parseGeoapifySearch(await $fetch<any>('https://api.geoapify.com/v1/geocode/search', {
+      query: { text: q, format: 'json', limit: 5, apiKey: geoapifyKey },
+      headers: { 'User-Agent': USER_AGENT },
+      timeout: 15_000,
+    }))
+  }
+  return parseNominatimSearch(await $fetch<any>('https://nominatim.openstreetmap.org/search', {
+    query: { q, format: 'jsonv2', limit: 5 },
+    headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
+    timeout: 15_000,
+  }))
+}

@@ -2,6 +2,8 @@ import { DatabaseSync } from 'node:sqlite'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { distM } from './placeLabel'
+import { BssidError, cleanBssidList, isUsableBssid, normalizeBssid } from '../../shared/utils/bssid'
+import { kindFromLabel } from '../../shared/utils/placeKinds'
 
 // Places the user has named or corrected, and places the system has learned
 // from repeat visits. Kept apart from the lookup cache: the cache can be deleted
@@ -25,12 +27,29 @@ export interface SavedPlace {
   // For learned places, JSON describing why: the lookup sources, confidence and
   // trips that led to it.
   learned_from: string | null
+  // Wi-Fi access points (BSSIDs) a person attached to the place: a scan that hears any
+  // of them puts the car here when GNSS has no fix. Never network names.
+  bssids: string[]
   created_at: number
   updated_at: number
 }
 
 export type SavedInput = Pick<SavedPlace, 'name' | 'lat' | 'lon'> &
-  Partial<Pick<SavedPlace, 'category' | 'radius_m' | 'note'>>
+  Partial<Pick<SavedPlace, 'category' | 'radius_m' | 'note' | 'bssids'>>
+
+// One access point heard in a scan.
+export interface HeardAp {
+  bssid: string
+  rssi_dbm: number | null
+}
+
+export interface BssidMatch {
+  place: SavedPlace
+  // How many of the scan's access points are attached to the place.
+  matches: number
+  // The strongest signal among them, the tie-break between places.
+  best_rssi_dbm: number | null
+}
 
 export interface Dismissal {
   lat: number
@@ -44,6 +63,9 @@ export interface SavedExport {
   exported_at: string
   saved: Array<Omit<SavedPlace, 'id'>>
   dismissed: Dismissal[]
+  // Choices such as whether unknown networks may be looked up. Optional: older
+  // exports have none.
+  settings?: Record<string, string>
 }
 
 export const DEFAULT_RADIUS_M = 100
@@ -66,6 +88,7 @@ CREATE TABLE IF NOT EXISTS dismissed_places (
   id INTEGER PRIMARY KEY,
   lat REAL NOT NULL, lon REAL NOT NULL, radius_m INTEGER NOT NULL, created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 `
 
 export class SavedPlaceError extends Error {}
@@ -107,8 +130,32 @@ export function cleanSaved(input: Partial<SavedInput>, partial = false): Partial
     if (n.length > 500) throw new SavedPlaceError('Notes are limited to 500 characters')
     out.note = n || null
   }
+  if (input.bssids !== undefined) {
+    try {
+      out.bssids = cleanBssidList(input.bssids)
+    } catch (e) {
+      if (e instanceof BssidError) throw new SavedPlaceError(e.message)
+      throw e
+    }
+  }
   return out
 }
+
+// The stored JSON list, read leniently: a hand-edited file loses a bad entry rather
+// than the place.
+function parseBssids(raw: unknown): string[] {
+  if (typeof raw !== 'string' || !raw) return []
+  try {
+    const list = JSON.parse(raw)
+    return Array.isArray(list) ? [...new Set(list.map(normalizeBssid).filter(isUsableBssid))].sort() : []
+  } catch { return [] }
+}
+
+function fromRow(r: any): SavedPlace {
+  return { ...r, bssids: parseBssids(r.bssids) }
+}
+
+const isHome = (category: string | null | undefined) => kindFromLabel(category) === 'home'
 
 export interface SavedPlacesOptions {
   // Where the JSON mirror and rotating backups go. Omit for none.
@@ -145,16 +192,18 @@ export class SavedPlaces {
     const cols = new Set((this.db.prepare('PRAGMA table_info(saved_places)').all() as any[]).map(c => c.name))
     if (!cols.has('source')) this.db.exec(`ALTER TABLE saved_places ADD COLUMN source TEXT NOT NULL DEFAULT 'user'`)
     if (!cols.has('learned_from')) this.db.exec('ALTER TABLE saved_places ADD COLUMN learned_from TEXT')
+    if (!cols.has('bssids')) this.db.exec('ALTER TABLE saved_places ADD COLUMN bssids TEXT')
   }
 
   // ---- reads ----
 
   list(): SavedPlace[] {
-    return this.db.prepare('SELECT * FROM saved_places ORDER BY name COLLATE NOCASE').all() as unknown as SavedPlace[]
+    return (this.db.prepare('SELECT * FROM saved_places ORDER BY name COLLATE NOCASE').all() as any[]).map(fromRow)
   }
 
   get(id: number): SavedPlace | null {
-    return (this.db.prepare('SELECT * FROM saved_places WHERE id = ?').get(id) as unknown as SavedPlace) ?? null
+    const r = this.db.prepare('SELECT * FROM saved_places WHERE id = ?').get(id)
+    return r ? fromRow(r) : null
   }
 
   // The saved place whose circle covers the point; the nearest centre wins when
@@ -167,6 +216,61 @@ export class SavedPlaces {
       if (d <= p.radius_m && d < bestD) { best = p; bestD = d }
     }
     return best
+  }
+
+  // The saved place a Wi-Fi scan was taken at: the one with the most of the scan's
+  // access points attached, the strongest signal among them breaking a tie. Null when
+  // no place has any of them.
+  matchBssids(heard: HeardAp[]): BssidMatch | null {
+    const rssi = new Map<string, number | null>()
+    for (const a of heard) {
+      const b = normalizeBssid(a.bssid)
+      if (!isUsableBssid(b)) continue
+      const prev = rssi.get(b)
+      const v = a.rssi_dbm == null || !Number.isFinite(Number(a.rssi_dbm)) ? null : Number(a.rssi_dbm)
+      rssi.set(b, prev == null ? v : v == null ? prev : Math.max(prev, v))
+    }
+    if (!rssi.size) return null
+
+    let best: BssidMatch | null = null
+    for (const place of this.list()) {
+      let matches = 0
+      let strongest: number | null = null
+      for (const b of place.bssids) {
+        if (!rssi.has(b)) continue
+        matches++
+        const v = rssi.get(b) ?? null
+        if (v != null && (strongest == null || v > strongest)) strongest = v
+      }
+      if (!matches) continue
+      const better = !best
+        || matches > best.matches
+        || (matches === best.matches && (strongest ?? -999) > (best.best_rssi_dbm ?? -999))
+      if (better) best = { place, matches, best_rssi_dbm: strongest }
+    }
+    return best
+  }
+
+  // The place marked Home (its kind picked as Home), if any.
+  home(): SavedPlace | null {
+    return this.list().find(p => isHome(p.category)) ?? null
+  }
+
+  // ---- settings ----
+
+  getSetting(key: string): string | null {
+    return (this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as any)?.value ?? null
+  }
+
+  setSetting(key: string, value: string): void {
+    this.db.prepare('INSERT INTO settings (key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value)
+    this.snapshot()
+  }
+
+  settings(): Record<string, string> {
+    const out: Record<string, string> = {}
+    for (const r of this.db.prepare('SELECT key, value FROM settings ORDER BY key').all() as any[]) out[r.key] = r.value
+    return out
   }
 
   dismissals(): Dismissal[] {
@@ -183,13 +287,26 @@ export class SavedPlaces {
   create(input: SavedInput, opts: { source?: PlaceSourceKind; learned_from?: unknown } = {}, now = Date.now()): SavedPlace {
     const c = cleanSaved(input) as SavedInput
     const res = this.db.prepare(`INSERT INTO saved_places
-      (name, category, lat, lon, radius_m, note, source, learned_from, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
+      (name, category, lat, lon, radius_m, note, source, learned_from, bssids, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
       c.name, c.category ?? null, c.lat, c.lon, c.radius_m ?? DEFAULT_RADIUS_M, c.note ?? null,
-      opts.source ?? 'user', opts.learned_from == null ? null : JSON.stringify(opts.learned_from), now, now,
+      opts.source ?? 'user', opts.learned_from == null ? null : JSON.stringify(opts.learned_from),
+      JSON.stringify(c.bssids ?? []), now, now,
     )
+    const id = Number(res.lastInsertRowid)
+    if (isHome(c.category)) this.demoteOtherHomes(id, now)
     this.snapshot()
-    return this.get(Number(res.lastInsertRowid))!
+    return this.get(id)!
+  }
+
+  // There is one Home. Marking a place Home takes the kind off any other place that
+  // had it; the other place keeps its name and everything else.
+  private demoteOtherHomes(keepId: number, now: number) {
+    for (const p of this.list()) {
+      if (p.id !== keepId && isHome(p.category)) {
+        this.db.prepare(`UPDATE saved_places SET category = NULL, updated_at = ? WHERE id = ?`).run(now, p.id)
+      }
+    }
   }
 
   // Any edit makes the place the user's: a learned place stops being learned the
@@ -199,8 +316,9 @@ export class SavedPlaces {
     if (!cur) return null
     const c = cleanSaved(patch, true)
     const next = { ...cur, ...c }
-    this.db.prepare(`UPDATE saved_places SET name=?, category=?, lat=?, lon=?, radius_m=?, note=?, source='user', updated_at=? WHERE id=?`)
-      .run(next.name, next.category, next.lat, next.lon, next.radius_m, next.note, now, id)
+    this.db.prepare(`UPDATE saved_places SET name=?, category=?, lat=?, lon=?, radius_m=?, note=?, bssids=?, source='user', updated_at=? WHERE id=?`)
+      .run(next.name, next.category, next.lat, next.lon, next.radius_m, next.note, JSON.stringify(next.bssids ?? []), now, id)
+    if (isHome(next.category)) this.demoteOtherHomes(id, now)
     this.snapshot()
     return this.get(id)
   }
@@ -232,6 +350,7 @@ export class SavedPlaces {
       exported_at: now.toISOString(),
       saved: this.list().map(({ id: _id, ...rest }) => rest),
       dismissed: this.dismissals(),
+      settings: this.settings(),
     }
   }
 
@@ -245,7 +364,7 @@ export class SavedPlaces {
     let added = 0
     let skipped = 0
     for (const s of d.saved) {
-      const clean = cleanSaved({ name: s.name, lat: s.lat, lon: s.lon, radius_m: s.radius_m, category: s.category, note: s.note }) as SavedInput
+      const clean = cleanSaved({ name: s.name, lat: s.lat, lon: s.lon, radius_m: s.radius_m, category: s.category, note: s.note, bssids: s.bssids }) as SavedInput
       if (have.some(h => h.name.toLowerCase() === clean.name.toLowerCase() && distM(h.lat, h.lon, clean.lat, clean.lon) <= 10)) {
         skipped++
         continue
@@ -264,6 +383,13 @@ export class SavedPlaces {
       dismissed++
     }
 
+    // A choice made here wins over one in the file; a choice only the file has is kept.
+    const haveSettings = this.settings()
+    for (const [k, v] of Object.entries(d.settings && typeof d.settings === 'object' ? d.settings : {})) {
+      if (typeof v !== 'string' || !/^[a-z0-9_]{1,40}$/.test(k) || v.length > 200 || k in haveSettings) continue
+      this.db.prepare('INSERT INTO settings (key, value) VALUES (?,?)').run(k, v)
+    }
+
     this.snapshot()
     return { added, skipped, dismissed }
   }
@@ -272,10 +398,10 @@ export class SavedPlaces {
   private createRaw(c: SavedInput, source: PlaceSourceKind, learnedFrom: string | null, createdAt?: number, updatedAt?: number) {
     const now = Date.now()
     this.db.prepare(`INSERT INTO saved_places
-      (name, category, lat, lon, radius_m, note, source, learned_from, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
+      (name, category, lat, lon, radius_m, note, source, learned_from, bssids, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
       c.name, c.category ?? null, c.lat, c.lon, c.radius_m ?? DEFAULT_RADIUS_M, c.note ?? null,
-      source, learnedFrom, createdAt ?? now, updatedAt ?? now,
+      source, learnedFrom, JSON.stringify(c.bssids ?? []), createdAt ?? now, updatedAt ?? now,
     )
   }
 
