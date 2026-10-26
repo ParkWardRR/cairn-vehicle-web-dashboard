@@ -26,7 +26,26 @@ const props = defineProps<{
   // Keep the highlight in view by panning when it nears the edge (used while the
   // trip is playing).
   followHighlight?: boolean
+  // Where Wi-Fi scans put the car while GNSS had no fix. Estimates, drawn apart from the
+  // track (hollow, dashed) and never joined to it except by a dashed connector.
+  wifiEstimates?: WifiEstimate[]
+  // The first and last GNSS fix of the trip, to tell an estimate before the track from
+  // one after it.
+  firstFixAt?: string | null
+  lastFixAt?: string | null
 }>()
+
+interface WifiEstimate {
+  from: string
+  to: string
+  scans: number
+  lat: number
+  lon: number
+  accuracy_m: number | null
+  source: 'place' | 'learned' | 'beacondb'
+  place: { id: number; name: string; kind: string } | null
+  aps: number
+}
 
 const emit = defineEmits<{ (e: 'select-stop', index: number): void }>()
 
@@ -39,6 +58,95 @@ let map: any = null
 let highlightMarker: any = null
 let estStartLayers: any[] = []
 let stopMarkers: any[] = []
+let wifiLayers: any[] = []
+const wifiEnabled = ref(true)
+const hasWifi = computed(() => (props.wifiEstimates?.length ?? 0) > 0)
+
+const WIFI_COLOR = '#f472b6'
+const WIFI_SOURCE_LABEL: Record<WifiEstimate['source'], string> = { place: 'place', learned: 'learned', beacondb: 'beaconDB' }
+
+function toggleWifi() {
+  wifiEnabled.value = !wifiEnabled.value
+  if (!map) return
+  for (const layer of wifiLayers) {
+    if (wifiEnabled.value) layer.addTo(map)
+    else map.removeLayer(layer)
+  }
+}
+
+// Store times may come without a zone; they are UTC.
+function parseT(s: string | null | undefined): number | null {
+  if (!s) return null
+  const iso = /(?:[zZ]|[+-]\d\d:?\d\d)$/.test(s) ? s : `${s.trim().replace(' ', 'T')}Z`
+  const t = Date.parse(iso)
+  return Number.isFinite(t) ? t : null
+}
+
+function fmtWifiTime(s: string): string {
+  const t = parseT(s)
+  if (t == null || new Date(t).getFullYear() < 2000) return ''
+  return new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+}
+
+function wifiTooltip(e: WifiEstimate): string {
+  const what = `Wi-Fi estimate (${WIFI_SOURCE_LABEL[e.source]})`
+  const where = e.source === 'place' && e.place ? `<div style="font-weight:600;margin-bottom:2px">${escapeHtml(e.place.name)}</div>` : ''
+  const a = fmtWifiTime(e.from)
+  const b = fmtWifiTime(e.to)
+  const when = a ? `<div style="opacity:.8">${a}${b && b !== a ? `–${b}` : ''}${e.scans > 1 ? ` · ${e.scans} scans` : ''}</div>` : (e.scans > 1 ? `<div style="opacity:.8">${e.scans} scans</div>` : '')
+  const acc = e.accuracy_m != null ? `<div style="opacity:.8">±${Math.round(e.accuracy_m)} m · ${e.aps} network${e.aps === 1 ? '' : 's'}</div>` : `<div style="opacity:.8">${e.aps} network${e.aps === 1 ? '' : 's'}</div>`
+  return `<div style="font-size:12px;line-height:1.5">${where}<div style="font-weight:600;color:${WIFI_COLOR}">${what}</div>${when}${acc}<div style="opacity:.6;font-size:11px">not a GPS fix; not used for distance or speed</div></div>`
+}
+
+function wifiIcon(L: any, e: WifiEstimate) {
+  const size = e.source === 'place' ? 22 : 16
+  const inner = e.source === 'place' && e.place ? placeIconSvg(e.place.kind, { size: 12, color: WIFI_COLOR, strokeWidth: 2.2 }) : ''
+  return L.divIcon({
+    className: '',
+    html: `<div style="width:${size}px;height:${size}px;border-radius:50%;border:2px dashed ${WIFI_COLOR};background:rgba(15,17,23,.55);display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.4)">${inner}</div>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  })
+}
+
+// Draws the Wi-Fi estimates: a hollow marker and its accuracy circle each, and a dashed
+// connector from the estimates before the first fix to it, and from the last fix to
+// those after. With no track at all, the estimates are joined in time order.
+// Returns the points worth fitting the map to.
+function drawWifi(L: any, first: { lat: number; lng: number } | null, last: { lat: number; lng: number } | null): [number, number][] {
+  wifiLayers.forEach(l => map.removeLayer(l))
+  wifiLayers = []
+  const list = [...(props.wifiEstimates ?? [])].sort((a, b) => (parseT(a.from) ?? 0) - (parseT(b.from) ?? 0))
+  if (!list.length) return []
+
+  const firstAt = parseT(props.firstFixAt)
+  const lastAt = parseT(props.lastFixAt)
+  const layers: any[] = []
+  for (const e of list) {
+    if (e.accuracy_m != null && e.accuracy_m > 0) {
+      layers.push(L.circle([e.lat, e.lon], { radius: e.accuracy_m, color: WIFI_COLOR, weight: 1, opacity: 0.6, dashArray: '3 5', fillColor: WIFI_COLOR, fillOpacity: 0.06, interactive: false }))
+    }
+    layers.push(L.marker([e.lat, e.lon], { icon: wifiIcon(L, e), zIndexOffset: -100 })
+      .bindTooltip(wifiTooltip(e), { direction: 'top', offset: [0, -10], className: 'trip-tooltip' }))
+  }
+
+  const dashed = (pts: [number, number][]) => {
+    if (pts.length >= 2) layers.push(L.polyline(pts, { color: WIFI_COLOR, weight: 2, opacity: 0.7, dashArray: '2, 7', interactive: false }))
+  }
+  if (first && last && firstAt != null && lastAt != null) {
+    const before = list.filter(e => (parseT(e.to) ?? Infinity) < firstAt)
+    const after = list.filter(e => (parseT(e.from) ?? -Infinity) > lastAt)
+    dashed([...before.map(e => [e.lat, e.lon] as [number, number]), [first.lat, first.lng]])
+    dashed([[last.lat, last.lng], ...after.map(e => [e.lat, e.lon] as [number, number])])
+  } else if (!first) {
+    dashed(list.map(e => [e.lat, e.lon] as [number, number]))
+  }
+
+  wifiLayers = layers
+  if (wifiEnabled.value) layers.forEach(l => l.addTo(map))
+  // A rough estimate far away should not zoom the map out of the trip.
+  return list.filter(e => e.accuracy_m == null || e.accuracy_m <= 1000).map(e => [e.lat, e.lon] as [number, number])
+}
 
 function setEstStartVisible(visible: boolean) {
   if (!map) return
@@ -165,7 +273,12 @@ function buildRoute(L: any) {
     }
   })
 
-  if (validPoints.length < 2) return
+  if (validPoints.length < 2) {
+    // No track to draw; the Wi-Fi estimates may still say where the car was.
+    const wifiPts = drawWifi(L, null, null)
+    if (wifiPts.length) map.fitBounds(L.latLngBounds(wifiPts), { padding: [40, 40], maxZoom: 16 })
+    return
+  }
 
   const comparing = (props.extraTracks?.length ?? 0) > 0
   const segmentSize = Math.max(1, Math.floor(validPoints.length / 150))
@@ -257,6 +370,7 @@ function buildRoute(L: any) {
   L.marker([last.lat, last.lng], { icon: endIcon }).addTo(map)
 
   const allPts = validPoints.map((p: any) => [p.lat, p.lng] as [number, number])
+  allPts.push(...drawWifi(L, first, last))
   if (props.prevEnd && props.firstObdMs != null && (props.firstFixMs == null || props.firstFixMs > props.firstObdMs)) {
     allPts.push([props.prevEnd.lat, props.prevEnd.lon])
   }
@@ -292,7 +406,7 @@ onMounted(async () => {
   }
 })
 
-watch(() => [props.coordinates, props.speeds, props.stops, props.extraTracks], async () => {
+watch(() => [props.coordinates, props.speeds, props.stops, props.extraTracks, props.wifiEstimates], async () => {
   if (!ready.value || !map) return
   map.eachLayer((layer: any) => {
     if (!layer._url && !layer._container?.classList?.contains('leaflet-control-container')) {
@@ -344,6 +458,23 @@ onUnmounted(() => {
       <span v-if="stops?.length" class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm" style="background: #2dd4bf" /> Medium</span>
       <span v-if="stops?.length" class="flex items-center gap-1"><span class="w-3 h-3 rounded-sm" style="background: #a78bfa" /> Long</span>
     </div>
+
+    <button
+      v-if="ready && hasWifi"
+      class="absolute top-3 left-3 z-[1000] flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-semibold transition-opacity"
+      :style="{
+        background: 'rgba(15, 17, 23, 0.85)',
+        backdropFilter: 'blur(8px)',
+        color: wifiEnabled ? WIFI_COLOR : 'var(--color-text-secondary)',
+        opacity: wifiEnabled ? 1 : 0.5,
+        border: wifiEnabled ? '1px solid rgba(244, 114, 182, 0.35)' : '1px solid transparent',
+      }"
+      title="Where Wi-Fi scans put the car while GPS had no fix: estimates, not fixes"
+      @click.stop="toggleWifi"
+    >
+      <span class="w-2.5 h-2.5 rounded-full" :style="{ border: `1.5px dashed ${wifiEnabled ? WIFI_COLOR : '#6b7280'}` }" />
+      Wi-Fi estimates
+    </button>
 
     <button
       v-if="ready && hasEstStart"

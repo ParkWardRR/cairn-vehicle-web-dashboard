@@ -42,7 +42,13 @@ interface PlaceItem {
   last_at: string | null
 }
 
-const { data, status, refresh } = useFetch<{ trips: PlaceTrip[]; places: PlaceItem[]; saved: SavedPlace[]; hints: { home_place_id: number | null }; storage: Storage; pending: boolean; attribution: string[] }>('/api/places')
+interface WifiSettings {
+  beacondb: { chosen: boolean; allowed: boolean; enabled: boolean; reason: string | null }
+  lookups: { found: number; none: number }
+  attribution: string[]
+}
+
+const { data, status, refresh } = useFetch<{ trips: PlaceTrip[]; places: PlaceItem[]; saved: SavedPlace[]; hints: { home_place_id: number | null }; storage: Storage; pending: boolean; attribution: string[]; wifi?: WifiSettings }>('/api/places')
 
 // Names are looked up in the background the first time; ask again until done.
 let polls = 0
@@ -122,6 +128,7 @@ interface SavedPlace {
   note: string | null
   source: 'user' | 'learned'
   learned_from: string | null
+  bssids?: string[]
 }
 
 interface Storage {
@@ -139,12 +146,10 @@ interface Suggestion {
   dist_m: number
 }
 
-const KIND_CHOICES = PICKER_KINDS
-const RADII = [50, 100, 150, 250, 400]
-
-// What the user is changing. lat/lon follow the pin if it is dragged.
+// What the user is changing. lat/lon follow the pin if it is dragged or the map is
+// clicked. placeId is null for a place that is not on the map yet.
 interface Draft {
-  placeId: number
+  placeId: number | null
   savedId: number | null
   name: string
   category: string | null
@@ -157,6 +162,7 @@ const draft = ref<Draft | null>(null)
 const saving = ref(false)
 const saveError = ref<string | null>(null)
 let editCircle: any = null
+let draftMarker: any = null
 
 const homeSuggestion = computed(() => {
   const id = data.value?.hints?.home_place_id
@@ -167,31 +173,49 @@ function kindOfPlace(p: PlaceItem): string {
   return p.label?.kind ?? 'other'
 }
 
-// The kind picked in the editor, from the label it stores.
-function draftKind(): string {
-  return kindForCategory(draft.value?.category)
-}
-
-// Names offered for the spot, those that look like the chosen kind first.
-function rankedSuggestions(p: PlaceItem): Suggestion[] {
-  return rankByKind(p.suggestions, draftKind())
-}
-
-function pickKind(id: string) {
-  const d = draft.value
-  if (!d) return
-  const k = placeKind(id)
-  if (draftKind() === id) { d.category = null; return }
-  d.category = k.label
-  // A kind with an obvious name (Home, Work) fills it in if nothing is there yet.
-  if (!d.name.trim() && k.defaultName) d.name = k.defaultName
-}
+// The saved place that is Home now, unless it is the one being edited.
+const otherHome = computed(() => {
+  const h = (data.value?.saved ?? []).find(s => kindFromLabel(s.category) === 'home')
+  return h && h.id !== draft.value?.savedId ? h.name : null
+})
 
 // The engine thinks this spot is home: open the editor already set to Home.
 function setAsHome(p: PlaceItem) {
   select(p.id)
   startEdit(p)
   if (draft.value) { draft.value.category = 'Home'; draft.value.name = 'Home' }
+}
+
+// Accepting the suggestion is one click: save it as Home where the trips start and end.
+const homeError = ref<string | null>(null)
+async function acceptHome(p: PlaceItem) {
+  homeError.value = null
+  try {
+    await $fetch('/api/places/saved', { method: 'POST', body: { name: 'Home', category: 'Home', lat: p.lat, lon: p.lon, radius_m: 100 } })
+    await refresh()
+    selectNear(p.lat, p.lon)
+  } catch (e: any) {
+    homeError.value = e?.data?.statusMessage ?? 'Could not save Home'
+  }
+}
+
+// A place that is not on the map yet: the pin starts in the middle of the map, and a
+// click on the map, a drag, coordinates or an address put it where it belongs.
+function startNew() {
+  const c = map?.getCenter()
+  saveError.value = null
+  selectedId.value = null
+  draft.value = { placeId: null, savedId: null, name: '', category: null, radius_m: 100, lat: c?.lat ?? 34.03, lon: c?.lng ?? -118.47 }
+  renderMarkers()
+  nextTick(() => document.getElementById('place-new')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))
+}
+
+// After the draft was moved from the form: show the pin there.
+function onDraftMoved() {
+  const d = draft.value
+  if (!d) return
+  renderMarkers()
+  if (map) map.flyTo([d.lat, d.lon], Math.max(map.getZoom(), 16), { duration: 0.6 })
 }
 
 function savedFor(p: PlaceItem): SavedPlace | null {
@@ -221,11 +245,6 @@ function cancelEdit() {
   renderMarkers()
 }
 
-function pickSuggestion(s: Suggestion) {
-  if (!draft.value) return
-  draft.value.name = s.name
-}
-
 async function saveDraft() {
   const d = draft.value
   if (!d) return
@@ -248,7 +267,7 @@ async function saveDraft() {
 async function removeSaved(p: PlaceItem) {
   const s = savedFor(p)
   if (!s) return
-  if (!confirm(`Stop using "${s.name}" for this place? Visits go back to their automatic names.`)) return
+  if (!confirm(`Delete "${s.name}"? Visits here go back to their automatic names, and the networks attached to it are forgotten.`)) return
   try {
     await $fetch(`/api/places/saved/${s.id}`, { method: 'DELETE' })
     draft.value = null
@@ -297,6 +316,21 @@ async function importFile(e: Event) {
     importMsg.value = err?.data?.statusMessage ?? 'That file is not a Cairn saved-places export'
   } finally {
     (e.target as HTMLInputElement).value = ''
+  }
+}
+
+const wifiSaving = ref(false)
+const wifiError = ref<string | null>(null)
+async function setBeacondb(on: boolean) {
+  wifiSaving.value = true
+  wifiError.value = null
+  try {
+    await $fetch('/api/places/settings', { method: 'PATCH', body: { beacondb: on } })
+    await refresh()
+  } catch (e: any) {
+    wifiError.value = e?.data?.statusMessage ?? 'Could not change the setting'
+  } finally {
+    wifiSaving.value = false
   }
 }
 
@@ -349,6 +383,14 @@ onMounted(async () => {
   map = L.map(mapEl.value, { zoomControl: false, attributionControl: false }).setView([34.03, -118.47], 13)
   L.control.zoom({ position: 'topright' }).addTo(map)
   L.tileLayer(tileUrl, { maxZoom: 19 }).addTo(map)
+  // While a place is being edited or added, a click on the map moves its pin there.
+  map.on('click', (e: any) => {
+    const d = draft.value
+    if (!d) return
+    d.lat = e.latlng.lat
+    d.lon = e.latlng.lng
+    renderMarkers()
+  })
   mapReady.value = true
   renderMarkers(true)
   selectFromQuery()
@@ -359,7 +401,9 @@ function renderMarkers(fit = false) {
   if (!map || !L) return
   markers.forEach(m => map.removeLayer(m))
   markers = new Map()
-  if (!places.value.length) return
+  if (draftMarker) { map.removeLayer(draftMarker); draftMarker = null }
+  drawDraftMarker()
+  if (!places.value.length) { drawEditCircle(); return }
 
   const allPts: [number, number][] = []
   for (const p of places.value) {
@@ -410,6 +454,26 @@ function renderMarkers(fit = false) {
   }
 }
 
+// The pin of a place being added, which is not in the list yet.
+function drawDraftMarker() {
+  const L = leaflet
+  const d = draft.value
+  if (!map || !L || !d || d.placeId != null) return
+  const icon = L.divIcon({
+    className: '',
+    html: endpointMarkerHtml(kindForCategory(d.category, d.name), 28, '#a78bfa', '3px solid #fff'),
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+  })
+  draftMarker = L.marker([d.lat, d.lon], { icon, draggable: true, zIndexOffset: 2000 })
+    .bindTooltip('New place: drag me, or click the map', { direction: 'top', offset: [0, -14], className: 'trip-tooltip' })
+    .on('dragend', (e: any) => {
+      const ll = e.target.getLatLng()
+      if (draft.value) { draft.value.lat = ll.lat; draft.value.lon = ll.lng; drawEditCircle() }
+    })
+    .addTo(map)
+}
+
 // A trip start/end place: a plain dot, or a circle holding its kind's icon.
 function endpointMarkerHtml(kind: string, size: number, color: string, ring: string): string {
   const frame = `width:${size}px;height:${size}px;border-radius:50%;background:${color};border:${ring};box-shadow:0 2px 6px rgba(0,0,0,.5)`
@@ -448,6 +512,13 @@ onUnmounted(() => {
   <div>
     <LayoutPageHeader title="Places" subtitle="Where you stopped, and where trips started and ended">
       <template #actions>
+        <button
+          type="button"
+          class="px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-colors hover:brightness-125"
+          style="background: var(--color-accent-soft); color: var(--color-accent)"
+          :disabled="!mapReady"
+          @click="startNew"
+        >+ Add a place</button>
         <span v-if="places.length" class="text-xs font-medium px-2.5 py-1 rounded-full" style="background: var(--color-accent-soft); color: var(--color-accent)">
           {{ places.length }} places · {{ stopCount }} stops
         </span>
@@ -475,12 +546,34 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <!-- A place added by hand -->
+    <div
+      v-if="draft && draft.placeId == null"
+      id="place-new"
+      class="rounded-xl p-4 mb-4"
+      :style="{ backgroundColor: 'var(--color-surface)', border: '1px solid #a78bfa' }"
+    >
+      <p class="text-[13px] font-medium">New place</p>
+      <p class="text-[11px] mt-0.5" style="color: var(--color-text-secondary)">
+        Click the map where it is, drag the pin, enter coordinates or find an address. Give it a name and a kind; Home is one of them.
+      </p>
+      <PlacesPlaceEditor
+        :draft="draft"
+        :saving="saving"
+        :error="saveError"
+        :other-home="otherHome"
+        @save="saveDraft"
+        @cancel="cancelEdit"
+        @moved="onDraftMoved"
+      />
+    </div>
+
     <div v-if="status === 'pending' && !data" class="space-y-2">
       <div v-for="i in 4" :key="i" class="skeleton h-16" />
     </div>
 
     <div v-else-if="places.length === 0" class="rounded-xl p-6" :style="{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }">
-      <p class="text-[13px]" style="color: var(--color-text-secondary)">No trips with GPS data yet.</p>
+      <p class="text-[13px]" style="color: var(--color-text-secondary)">No trips with GPS data yet. You can still add the places you know with “Add a place”.</p>
     </div>
 
     <template v-else>
@@ -497,7 +590,9 @@ onUnmounted(() => {
           <span class="font-semibold">This looks like home.</span>
           <span style="color: var(--color-text-secondary)"> Your trips start and end here more than anywhere else. Marking it helps the engine name your other places and trips.</span>
         </span>
-        <button type="button" class="px-3 py-1.5 rounded-lg text-[12px] font-semibold" style="background: var(--color-accent); color: #fff" @click="setAsHome(homeSuggestion)">Set as Home</button>
+        <button type="button" class="px-3 py-1.5 rounded-lg text-[12px] font-semibold" style="background: var(--color-accent); color: #fff" @click="acceptHome(homeSuggestion)">Set as Home</button>
+        <button type="button" class="px-2 py-1.5 rounded-lg text-[12px]" style="color: var(--color-text-secondary)" @click="setAsHome(homeSuggestion)">Adjust first</button>
+        <p v-if="homeError" class="w-full text-[12px]" style="color: var(--color-danger)">{{ homeError }}</p>
       </div>
 
       <!-- Places -->
@@ -544,7 +639,8 @@ onUnmounted(() => {
                 type="button"
                 class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md transition-colors hover:brightness-125"
                 style="background: rgba(167,139,250,.15); color: #a78bfa"
-                @click.stop="setAsHome(p)"
+                title="Save this place as Home"
+                @click.stop="acceptHome(p)"
               >
                 <PlaceIcon kind="home" :size="12" />Looks like home
               </button>
@@ -591,94 +687,26 @@ onUnmounted(() => {
             </div>
 
             <!-- Editor -->
-            <form v-if="draft && draft.placeId === p.id" class="mt-3 space-y-3 rounded-lg p-3" style="background: var(--color-surface-elevated)" @submit.prevent="saveDraft">
-              <div>
-                <label class="block text-[10px] font-semibold uppercase tracking-wider mb-1" style="color: var(--color-text-secondary)">Name</label>
-                <input
-                  v-model="draft.name"
-                  type="text"
-                  maxlength="80"
-                  placeholder="e.g. Home, Gym, Mom's house"
-                  class="w-full rounded-md px-2.5 py-1.5 text-[13px] outline-none"
-                  style="background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-text)"
-                  autofocus
-                >
-              </div>
+            <PlacesPlaceEditor
+              v-if="draft && draft.placeId === p.id"
+              :draft="draft"
+              :suggestions="p.suggestions"
+              :saving="saving"
+              :error="saveError"
+              :other-home="otherHome"
+              @save="saveDraft"
+              @cancel="cancelEdit"
+              @remove="removeSaved(p)"
+              @moved="onDraftMoved"
+            />
 
-              <div>
-                <p class="text-[10px] font-semibold uppercase tracking-wider mb-1" style="color: var(--color-text-secondary)">
-                  Kind <span class="normal-case font-normal tracking-normal opacity-70">a hint: it ranks the names below and sets the icon</span>
-                </p>
-                <div class="flex flex-wrap gap-1.5">
-                  <button
-                    v-for="k in KIND_CHOICES"
-                    :key="k.id"
-                    type="button"
-                    class="inline-flex items-center gap-1.5 pl-1.5 pr-2.5 py-1 rounded-lg text-[12px] transition-colors"
-                    :style="{ background: draftKind() === k.id ? 'var(--color-accent-soft)' : 'var(--color-surface)', border: '1px solid ' + (draftKind() === k.id ? 'var(--color-accent)' : 'var(--color-border)'), color: draftKind() === k.id ? 'var(--color-accent)' : 'var(--color-text)' }"
-                    @click="pickKind(k.id)"
-                  >
-                    <PlaceIcon :kind="k.id" :size="15" />{{ k.label }}
-                  </button>
-                </div>
-              </div>
-
-              <div v-if="p.suggestions.length">
-                <p class="text-[10px] font-semibold uppercase tracking-wider mb-1" style="color: var(--color-text-secondary)">Nearby, tap to use</p>
-                <div class="flex flex-wrap gap-1.5">
-                  <button
-                    v-for="s in rankedSuggestions(p)"
-                    :key="s.name"
-                    type="button"
-                    class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] transition-colors hover:brightness-125"
-                    :style="{ background: draft.name === s.name ? 'var(--color-accent-soft)' : 'var(--color-surface)', border: '1px solid var(--color-border)', color: draft.name === s.name ? 'var(--color-accent)' : 'var(--color-text)' }"
-                    @click="pickSuggestion(s)"
-                  >
-                    <PlaceIcon v-if="s.kind !== 'other'" :kind="s.kind" :size="12" />
-                    {{ s.name }}<span v-if="s.dist_m" class="opacity-50"> · {{ s.dist_m }} m</span>
-                  </button>
-                </div>
-              </div>
-
-              <div class="flex flex-wrap items-center gap-x-5 gap-y-2">
-                <div>
-                  <p class="text-[10px] font-semibold uppercase tracking-wider mb-1" style="color: var(--color-text-secondary)">Covers visits within</p>
-                  <div class="flex gap-1.5">
-                    <button
-                      v-for="r in RADII"
-                      :key="r"
-                      type="button"
-                      class="px-2 py-0.5 rounded-md text-[11px] font-mono transition-colors"
-                      :style="{ background: draft.radius_m === r ? 'var(--color-accent-soft)' : 'var(--color-surface)', border: '1px solid var(--color-border)', color: draft.radius_m === r ? 'var(--color-accent)' : 'var(--color-text)' }"
-                      @click="draft.radius_m = r"
-                    >{{ r }} m</button>
-                  </div>
-                </div>
-                <p class="text-[11px]" style="color: var(--color-text-secondary)">Drag the highlighted pin on the map to move it. The dashed circle shows what it covers.</p>
-              </div>
-
-              <p v-if="saveError" class="text-[12px]" style="color: var(--color-danger)">{{ saveError }}</p>
-
-              <div class="flex items-center gap-2">
-                <button
-                  type="submit"
-                  :disabled="saving || !draft.name.trim()"
-                  class="px-3.5 py-1.5 rounded-lg text-[12px] font-semibold disabled:opacity-40"
-                  style="background: var(--color-accent); color: #fff"
-                >{{ saving ? 'Saving…' : 'Save' }}</button>
-                <button type="button" class="px-3 py-1.5 rounded-lg text-[12px]" style="color: var(--color-text-secondary)" @click="cancelEdit">Cancel</button>
-                <button
-                  v-if="draft.savedId != null"
-                  type="button"
-                  class="ml-auto px-3 py-1.5 rounded-lg text-[12px]"
-                  style="color: var(--color-danger)"
-                  @click="removeSaved(p)"
-                >Stop using this name</button>
-              </div>
-              <p class="text-[10px]" style="color: var(--color-text-secondary)">
-                Saving applies to every past and future visit inside the circle, and nothing here is sent to any lookup service.
-              </p>
-            </form>
+            <!-- Wi-Fi networks that mark this place -->
+            <PlacesPlaceNetworks
+              v-if="savedFor(p) && draft?.placeId !== p.id"
+              :saved-id="savedFor(p)!.id"
+              :radius-m="savedFor(p)!.radius_m"
+              @saved="refresh()"
+            />
           </div>
         </div>
       </div>
@@ -739,8 +767,36 @@ onUnmounted(() => {
       </p>
     </div>
 
-    <p v-if="data?.attribution?.length" class="text-[10px] mt-6 px-1" style="color: var(--color-text-secondary)">
-      Place names: {{ data.attribution.join(' · ') }}
+    <!-- Wi-Fi positions -->
+    <div v-if="data?.wifi" class="mt-3 rounded-xl px-4 py-3 text-[12px]" :style="{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }">
+      <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+        <span class="font-semibold">Wi-Fi positions</span>
+        <span style="color: var(--color-text-secondary)">
+          When GPS has no fix, the car's Wi-Fi scans place it: a saved place whose networks it hears, then the networks it has learned, then beaconDB.
+        </span>
+        <label class="ml-auto inline-flex items-center gap-2 cursor-pointer" :style="{ opacity: data.wifi.beacondb.allowed ? 1 : 0.5 }">
+          <input
+            type="checkbox"
+            :checked="data.wifi.beacondb.chosen"
+            :disabled="!data.wifi.beacondb.allowed || wifiSaving"
+            class="accent-[var(--color-accent)]"
+            @change="setBeacondb(($event.target as HTMLInputElement).checked)"
+          >
+          <span class="font-semibold">Look up unknown networks in beaconDB</span>
+        </label>
+      </div>
+      <p class="mt-1.5 text-[11px]" style="color: var(--color-text-secondary)">
+        Only the networks' hardware addresses (BSSIDs) and signal strengths are sent, at least two at a time, never a name, a position or anything about the car; each set is asked about once and the answer kept. Nothing is ever submitted to beaconDB.
+        <template v-if="data.wifi.lookups.found + data.wifi.lookups.none"> {{ data.wifi.lookups.found }} found, {{ data.wifi.lookups.none }} unknown so far.</template>
+      </p>
+      <p v-if="data.wifi.beacondb.reason" class="mt-1 text-[11px]" style="color: var(--color-text-secondary)">{{ data.wifi.beacondb.reason }}</p>
+      <p v-if="wifiError" class="mt-1 text-[12px]" style="color: var(--color-danger)">{{ wifiError }}</p>
+    </div>
+
+    <p v-if="data?.attribution?.length || data?.wifi?.beacondb.enabled" class="text-[10px] mt-6 px-1" style="color: var(--color-text-secondary)">
+      <template v-if="data?.attribution?.length">Place names: {{ data.attribution.join(' · ') }}</template>
+      <template v-if="data?.attribution?.length && data?.wifi?.beacondb.enabled"> · </template>
+      <template v-if="data?.wifi?.beacondb.enabled">{{ data.wifi.attribution.join(' · ') }} (<a href="https://beacondb.net/" target="_blank" rel="noopener" class="underline-offset-2 hover:underline">beacondb.net</a>)</template>
     </p>
   </div>
 </template>

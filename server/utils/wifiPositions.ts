@@ -12,6 +12,7 @@ import { isUsableBssid, normalizeBssid } from '../../shared/utils/bssid'
 // (wifi_ap_obs), learns where each access point is from trusted GNSS fixes taken beside
 // learning scans (v_wifi_ap_learned), and lists the scans that had no trusted fix within
 // ±5 s together with its own estimate from that learned map (v_wifi_scan_unfixed).
+// The learned map is per car (vehicle_id, bssid, ...); a scan's estimate uses its own car.
 //
 // This layer resolves each unfixed scan, first match wins:
 //   (a) a saved place with one of the scan's BSSIDs attached: the place, accuracy its
@@ -351,8 +352,9 @@ const M_PER_DEG_LAT = 110540
 export interface EndpointVisit { boot_id: string; kind: string; key_ms: number; lat: number; lon: number; at: string | null }
 
 // The boot-clock windows to look in: before each departure from the place, after each
-// arrival at it. The newest `limit` visits.
-export function endpointWindows(place: Pick<SavedPlace, 'lat' | 'lon' | 'radius_m'>, visits: EndpointVisit[], limit = 100): Array<{ boot_id: string; lo_ms: number; hi_ms: number }> {
+// arrival at it. The newest `limit` visits: enough to see a place's networks, and it keeps
+// the statement short (each window is ~50 bytes of SQL).
+export function endpointWindows(place: Pick<SavedPlace, 'lat' | 'lon' | 'radius_m'>, visits: EndpointVisit[], limit = 40): Array<{ boot_id: string; lo_ms: number; hi_ms: number }> {
   return visits
     .filter(v => (v.kind === 'departure' || v.kind === 'arrival') && BOOT_RE.test(v.boot_id) && Number.isFinite(v.key_ms))
     .filter(v => distM(place.lat, place.lon, v.lat, v.lon) <= place.radius_m)
@@ -367,11 +369,19 @@ export function learnedNearSql(place: Pick<SavedPlace, 'lat' | 'lon' | 'radius_m
   const dLat = place.radius_m / M_PER_DEG_LAT
   const dLon = place.radius_m / (111320 * Math.max(0.01, Math.cos(place.lat * Math.PI / 180)))
   const f = (n: number) => n.toFixed(6)
+  // The map is learned per car (it has a vehicle_id); a saved place is anyone's, so the
+  // cars' entries for one access point are folded together, weighted by observations.
   return `
-    SELECT bssid, lat, lon, observations, spread_m, max_rssi_dbm, last_seen
+    SELECT bssid,
+           sum(lat * observations) / sum(observations) AS lat,
+           sum(lon * observations) / sum(observations) AS lon,
+           sum(observations) AS observations, max(spread_m) AS spread_m,
+           max(max_rssi_dbm) AS max_rssi_dbm, max(last_seen) AS last_seen
     FROM v_wifi_ap_learned
     WHERE lat BETWEEN ${f(place.lat - dLat)} AND ${f(place.lat + dLat)}
       AND lon BETWEEN ${f(place.lon - dLon)} AND ${f(place.lon + dLon)}
+      AND observations > 0
+    GROUP BY bssid
     ORDER BY observations DESC
     LIMIT 500
   `

@@ -139,7 +139,7 @@ const GET = (base: string, route: string, o?: CallOpts) => call(base, 'GET', rou
 const UNKNOWN_BOOT = '0'.repeat(32)
 const UNKNOWN_TRIP = `${UNKNOWN_BOOT}:0`
 const tripKey = /^[0-9a-f]{32}:[0-9]+$/
-const TRIP_SCOPED = ['/api/trips/:tripId', '/api/trips/:tripId/events', '/api/trips/:tripId/fuel', '/api/trips/:tripId/insights', '/api/trips/:tripId/route', '/api/trips/:tripId/stops', '/api/trips/:tripId/telemetry', '/api/trips/:tripId/timeline']
+const TRIP_SCOPED = ['/api/trips/:tripId', '/api/trips/:tripId/events', '/api/trips/:tripId/fuel', '/api/trips/:tripId/insights', '/api/trips/:tripId/route', '/api/trips/:tripId/stops', '/api/trips/:tripId/telemetry', '/api/trips/:tripId/timeline', '/api/trips/:tripId/wifi']
 const BOOT_QUERY = ['/api/analytics/telemetry', '/api/analytics/imu', '/api/analytics/drive-summary', '/api/analytics/boost-detail', '/api/analytics/fuel-health']
 
 beforeAll(async () => {
@@ -557,6 +557,22 @@ describe('representative data (synthetic demo store)', () => {
 
     const tl = await GET(DATA, '/api/trips/:tripId/timeline', { params: p })
     for (const series of ['obd', 'boost', 'gps']) expect(tl.body[series].length).toBeGreaterThan(0)
+
+    // Wi-Fi estimates: an older store has none, and says so rather than failing
+    const wifi = await GET(DATA, '/api/trips/:tripId/wifi', { params: p })
+    expect(wifi.status, wifi.text).toBe(200)
+    expect(typeof wifi.body.available).toBe('boolean')
+    expect(typeof wifi.body.pending).toBe('boolean')
+    expect(Array.isArray(wifi.body.estimates)).toBe(true)
+    expect(Array.isArray(wifi.body.attribution)).toBe(true)
+    if (!wifi.body.available) expect(wifi.body.estimates).toEqual([])
+    for (const e of wifi.body.estimates) {
+      expect(['place', 'learned', 'beacondb']).toContain(e.source)
+      expect(between(e.lat, -90, 90)).toBe(true)
+      expect(between(e.lon, -180, 180)).toBe(true)
+      expect(e.scans).toBeGreaterThan(0)
+      if (e.source !== 'place') expect(e.place).toBeNull()
+    }
   })
 
   it('places a trip that spans boots on one clock, so its charts run in time order', async () => {
@@ -664,6 +680,10 @@ describe('representative data (synthetic demo store)', () => {
     }
     expect(Array.isArray(pl.body.saved)).toBe(true)
     expect(typeof pl.body.storage).toBe('object')
+    // beaconDB is on by default, but this instance keeps every lookup local
+    expect(pl.body.wifi.beacondb).toMatchObject({ allowed: false, enabled: false })
+    expect(pl.body.wifi.beacondb.reason).toMatch(/NUXT_PLACES_EXTERNAL/)
+    expect(pl.body.wifi.attribution).toEqual(['Wi-Fi positions: beaconDB'])
   })
 
   it('serves the analytics', async () => {
@@ -1074,6 +1094,8 @@ describe('bad input', () => {
     expect((await call(DATA, 'POST', '/api/places/saved', text)).status).toBe(415)
     expect((await call(DATA, 'POST', '/api/places/saved/import', text)).status).toBe(415)
     expect((await call(DATA, 'PATCH', '/api/places/saved/:id', { params: { id: '1' }, ...text })).status).toBe(415)
+    expect((await call(DATA, 'PATCH', '/api/places/settings', { raw: '{"beacondb":false}', type: 'text/plain' })).status).toBe(415)
+    expect((await call(DATA, 'POST', '/api/places/geocode', { raw: '{"q":"Main St"}', type: 'text/plain' })).status).toBe(415)
   })
 
   it('refuses a saved place with no name, or coordinates off the planet', async () => {
@@ -1188,6 +1210,78 @@ describe('saved places: access and round trip', () => {
       expect(res.text, r.path).not.toContain(PLACES_DIR)
       expect(res.text, r.path).not.toMatch(/\.sqlite/)
     }
+  })
+})
+
+// ─── places set by hand, their Wi-Fi networks, beaconDB ─────────────────────
+
+describe('places set by hand and the networks that mark them', () => {
+  const AP1 = '00:00:5e:00:53:01'
+  const AP2 = '00:00:5e:00:53:02'
+
+  it('creates a place at given coordinates with networks, edits them, and refuses bad ones', async () => {
+    const made = await call(DATA, 'POST', '/api/places/saved', { json: { name: 'Wi-Fi garage', lat: 36.5801, lon: -121.9001, radius_m: 60, bssids: [AP2.toUpperCase(), AP1] } })
+    expect(made.status, made.text).toBe(200)
+    expect(made.body.saved.bssids).toEqual([AP1, AP2])
+    const id = String(made.body.saved.id)
+
+    // a hotspot or randomised MAC (locally administered) cannot mark a place
+    const bad = await call(DATA, 'PATCH', '/api/places/saved/:id', { params: { id }, json: { bssids: ['02:00:5e:00:53:09'] } })
+    expect(bad.status).toBe(400)
+    expect(bad.body.statusMessage).toMatch(/locally administered/)
+    expect((await call(DATA, 'PATCH', '/api/places/saved/:id', { params: { id }, json: { bssids: ['not-a-mac'] } })).status).toBe(400)
+    expect((await call(DATA, 'PATCH', '/api/places/saved/:id', { params: { id }, json: { bssids: 'aa' } })).status).toBe(400)
+
+    const edited = await call(DATA, 'PATCH', '/api/places/saved/:id', { params: { id }, json: { bssids: [AP1], radius_m: 75, lat: 36.5802 } })
+    expect(edited.body.saved).toMatchObject({ bssids: [AP1], radius_m: 75, lat: 36.5802 })
+
+    // the candidates: attached ones are always listed; the rest come from the store's Wi-Fi data
+    const nets = await GET(DATA, '/api/places/saved/:id/networks', { params: { id } })
+    expect(nets.status, nets.text).toBe(200)
+    expect(typeof nets.body.available).toBe('boolean')
+    expect(nets.body.attached).toEqual([AP1])
+    expect(nets.body.networks[0]).toMatchObject({ bssid: AP1, attached: true })
+    for (const n of nets.body.networks) {
+      expect(n.bssid).toMatch(/^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/)
+      expect(n).not.toHaveProperty('ssid')
+    }
+    expect((await GET(DATA, '/api/places/saved/:id/networks', { params: { id: '999999' } })).status).toBe(404)
+    expect((await GET(DATA, '/api/places/saved/:id/networks', { params: { id: 'abc' } })).status).toBe(400)
+
+    // exported with the place
+    const exp = await GET(DATA, '/api/places/saved/export')
+    expect(exp.body.saved.find((p: any) => p.name === 'Wi-Fi garage').bssids).toEqual([AP1])
+
+    expect((await call(DATA, 'DELETE', '/api/places/saved/:id', { params: { id } })).body).toEqual({ ok: true })
+  })
+
+  it('keeps one Home: a second is refused, so the first never quietly stops being a privacy zone', async () => {
+    const a = await call(DATA, 'POST', '/api/places/saved', { json: { name: 'First home', category: 'Home', lat: 36.61, lon: -121.91 } })
+    expect(a.status, a.text).toBe(200)
+    const b = await call(DATA, 'POST', '/api/places/saved', { json: { name: 'Second home', category: 'Home', lat: 36.62, lon: -121.92 } })
+    expect(b.status).toBe(400)
+    expect(b.body.statusMessage).toMatch(/already Home/)
+    await call(DATA, 'DELETE', '/api/places/saved/:id', { params: { id: String(a.body.saved.id) } })
+  })
+
+  it('turns beaconDB off and on, and refuses anything but a boolean', async () => {
+    const off = await call(DATA, 'PATCH', '/api/places/settings', { json: { beacondb: false } })
+    expect(off.status, off.text).toBe(200)
+    expect(off.body.wifi.beacondb).toMatchObject({ chosen: false, enabled: false })
+    expect((await GET(DATA, '/api/places')).body.wifi.beacondb.chosen).toBe(false)
+    expect((await call(DATA, 'PATCH', '/api/places/settings', { json: { beacondb: 'yes' } })).status).toBe(400)
+    expect((await call(DATA, 'PATCH', '/api/places/settings', { json: [] })).status).toBe(400)
+    const on = await call(DATA, 'PATCH', '/api/places/settings', { json: { beacondb: true } })
+    expect(on.body.wifi.beacondb.chosen).toBe(true)
+    // the read-only service token cannot change it
+    expect((await call(DATA, 'PATCH', '/api/places/settings', { json: { beacondb: false }, auth: 'service' })).status).toBe(403)
+  })
+
+  it('finds an address only where external lookups are on', async () => {
+    const r = await call(DATA, 'POST', '/api/places/geocode', { json: { q: '1 Main Street' } })
+    expect(r.status, r.text).toBe(200)
+    expect(r.body).toEqual({ external: false, results: [], attribution: [] })
+    expect((await call(DATA, 'POST', '/api/places/geocode', { json: { q: 'x' } })).status).toBe(400)
   })
 })
 

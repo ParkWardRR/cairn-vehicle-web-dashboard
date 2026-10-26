@@ -286,6 +286,7 @@ export class SavedPlaces {
 
   create(input: SavedInput, opts: { source?: PlaceSourceKind; learned_from?: unknown } = {}, now = Date.now()): SavedPlace {
     const c = cleanSaved(input) as SavedInput
+    if (isHome(c.category)) this.assertNoOtherHome(null)
     const res = this.db.prepare(`INSERT INTO saved_places
       (name, category, lat, lon, radius_m, note, source, learned_from, bssids, created_at, updated_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
@@ -293,20 +294,16 @@ export class SavedPlaces {
       opts.source ?? 'user', opts.learned_from == null ? null : JSON.stringify(opts.learned_from),
       JSON.stringify(c.bssids ?? []), now, now,
     )
-    const id = Number(res.lastInsertRowid)
-    if (isHome(c.category)) this.demoteOtherHomes(id, now)
     this.snapshot()
-    return this.get(id)!
+    return this.get(Number(res.lastInsertRowid))!
   }
 
-  // There is one Home. Marking a place Home takes the kind off any other place that
-  // had it; the other place keeps its name and everything else.
-  private demoteOtherHomes(keepId: number, now: number) {
-    for (const p of this.list()) {
-      if (p.id !== keepId && isHome(p.category)) {
-        this.db.prepare(`UPDATE saved_places SET category = NULL, updated_at = ? WHERE id = ?`).run(now, p.id)
-      }
-    }
+  // There is one Home. A second is refused rather than the first quietly losing its
+  // kind: Home is a privacy zone (shared/utils/redact.ts), and a former home should not
+  // stop being one without someone deciding so.
+  private assertNoOtherHome(selfId: number | null) {
+    const other = this.list().find(p => p.id !== selfId && isHome(p.category))
+    if (other) throw new SavedPlaceError(`“${other.name}” is already Home. Move that place, or give it another kind first.`)
   }
 
   // Any edit makes the place the user's: a learned place stops being learned the
@@ -316,9 +313,9 @@ export class SavedPlaces {
     if (!cur) return null
     const c = cleanSaved(patch, true)
     const next = { ...cur, ...c }
+    if (isHome(next.category) && !isHome(cur.category)) this.assertNoOtherHome(id)
     this.db.prepare(`UPDATE saved_places SET name=?, category=?, lat=?, lon=?, radius_m=?, note=?, bssids=?, source='user', updated_at=? WHERE id=?`)
       .run(next.name, next.category, next.lat, next.lon, next.radius_m, next.note, JSON.stringify(next.bssids ?? []), now, id)
-    if (isHome(next.category)) this.demoteOtherHomes(id, now)
     this.snapshot()
     return this.get(id)
   }

@@ -11,7 +11,7 @@ import {
   BEACONDB_URL, BeaconDb, beaconKey, beaconRequestBody, parseBeaconAnswer, type ScanAp,
 } from '../server/utils/beacondb'
 import {
-  apsByScan, endpointObsSql, endpointWindows, groupEstimates, mergeCandidates, resolveScans,
+  apsByScan, endpointObsSql, endpointWindows, groupEstimates, learnedNearSql, mergeCandidates, resolveScans,
   windowFrom, wifiAttribution, type UnfixedScan,
 } from '../server/utils/wifiPositions'
 import { USER_AGENT } from '../server/utils/placeSources'
@@ -111,16 +111,19 @@ describe('saved places and their networks', () => {
     expect(s.matchBssids([])).toBeNull()
   })
 
-  it('keeps one Home: marking a place Home takes the kind off the old one', () => {
+  it('keeps one Home: a second is refused, and the first keeps its kind (it is a privacy zone)', () => {
     const s = new SavedPlaces(':memory:')
     const a = s.create({ name: 'Old flat', lat: 34, lon: -118, category: 'Home' })
-    const b = s.create({ name: 'New house', lat: 34.1, lon: -118, category: 'Home' })
-    expect(s.get(a.id)!.category).toBeNull()
-    expect(s.get(a.id)!.name).toBe('Old flat')
-    expect(s.home()?.id).toBe(b.id)
-    s.update(a.id, { category: 'Home' })
+    expect(() => s.create({ name: 'New house', lat: 34.1, lon: -118, category: 'home' })).toThrow(/“Old flat” is already Home/)
+    const b = s.create({ name: 'New house', lat: 34.1, lon: -118 })
+    expect(() => s.update(b.id, { category: 'Home' })).toThrow(SavedPlaceError)
     expect(s.home()?.id).toBe(a.id)
-    expect(s.get(b.id)!.category).toBeNull()
+    // editing Home itself (moving it) is fine
+    expect(s.update(a.id, { lat: 34.2, category: 'Home' })!.lat).toBe(34.2)
+    // once the old one is something else, the new one can be Home
+    s.update(a.id, { category: 'Friends' })
+    expect(s.update(b.id, { category: 'Home' })!.category).toBe('Home')
+    expect(s.home()?.id).toBe(b.id)
   })
 
   it('exports and imports networks and settings', () => {
@@ -382,6 +385,14 @@ describe('networks seen here', () => {
     expect(sql).toContain(`('${boot}', 0, 60000)`)
     expect(sql).toMatch(/WITH w AS \(/)
     expect(endpointObsSql([])).toBeNull()
+  })
+
+  it('reads the learned map across cars, one row per access point, inside a box around the place', () => {
+    const sql = learnedNearSql({ lat: 34, lon: -118, radius_m: 100 })
+    expect(sql).toMatch(/FROM v_wifi_ap_learned/)
+    expect(sql).toMatch(/GROUP BY bssid/)
+    expect(sql).toMatch(/sum\(lat \* observations\) \/ sum\(observations\) AS lat/)
+    expect(sql).toContain('lat BETWEEN 33.999095 AND 34.000905')
   })
 
   it('merges the learned map and the trip ends, attached first, and never offers a hotspot', () => {

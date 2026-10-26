@@ -89,18 +89,44 @@ const { data: stopsData, refresh: refreshStops } = useFetch<{ stops: TripStop[];
   () => `/api/trips/${tripId.value}/stops`,
 )
 
-// Place names are looked up in the background the first time a trip is opened;
-// ask again until they arrive.
+// Where Wi-Fi scans put the car while GNSS had no fix (a cold start in the garage):
+// estimates drawn apart from the track, never part of it or of any figure on the page.
+interface WifiEstimate {
+  from: string
+  to: string
+  scans: number
+  lat: number
+  lon: number
+  accuracy_m: number | null
+  source: 'place' | 'learned' | 'beacondb'
+  place: { id: number; name: string; kind: string } | null
+  aps: number
+}
+const { data: wifiData, refresh: refreshWifi } = useFetch<{ available: boolean; estimates: WifiEstimate[]; scans: number; unresolved: number; pending: boolean; attribution: string[] }>(
+  () => `/api/trips/${tripId.value}/wifi`,
+)
+const wifiEstimates = computed(() => wifiData.value?.estimates ?? [])
+const hasWifi = computed(() => wifiEstimates.value.length > 0)
+const wifiSummary = computed(() => {
+  const by = { place: 0, learned: 0, beacondb: 0 }
+  for (const e of wifiEstimates.value) by[e.source] += e.scans
+  const names = [...new Set(wifiEstimates.value.filter(e => e.source === 'place' && e.place).map(e => e.place!.name))]
+  return { by, names }
+})
+
+// Place names (and beaconDB answers) are looked up in the background the first time a
+// trip is opened; ask again until they arrive.
 let polls = 0
 let pollTimer: ReturnType<typeof setTimeout> | null = null
-watch(() => [stopsData.value?.pending, trip.value?.places_pending], ([a, b]) => {
-  if ((a || b) && polls < 24) {
-    pollTimer = setTimeout(() => { polls++; refreshStops(); refreshTrip() }, 5000)
+watch(() => [stopsData.value?.pending, trip.value?.places_pending, wifiData.value?.pending], ([a, b, w]) => {
+  if ((a || b || w) && polls < 24) {
+    pollTimer = setTimeout(() => { polls++; refreshStops(); refreshTrip(); if (w) refreshWifi() }, 5000)
   }
 }, { immediate: true })
 onUnmounted(() => { if (pollTimer) clearTimeout(pollTimer) })
 
 const attribution = computed(() => [...new Set([...(stopsData.value?.attribution ?? []), ...(trip.value?.attribution ?? [])])])
+const wifiAttribution = computed(() => wifiData.value?.attribution ?? [])
 const stops = computed(() => stopsData.value?.stops ?? [])
 
 const selectedStop = ref<number | null>(null)
@@ -454,7 +480,7 @@ function insightIcon(icon: string | undefined): string {
       </div>
       <div class="rounded-xl overflow-hidden" :style="{ border: '1px solid var(--color-border)' }">
         <ClientOnly>
-          <div v-if="hasValidRoute" style="height: 420px">
+          <div v-if="hasValidRoute || hasWifi" style="height: 420px">
             <MapsTripMap
               :coordinates="coordinates"
               :extra-tracks="extraTracks"
@@ -469,6 +495,9 @@ function insightIcon(icon: string | undefined): string {
               :stops="stops"
               :selected-stop="selectedStop"
               :follow-highlight="!previewPos"
+              :wifi-estimates="wifiEstimates"
+              :first-fix-at="trip?.start?.observed_at ?? null"
+              :last-fix-at="trip?.end?.observed_at ?? null"
               @select-stop="onStopClick"
             />
           </div>
@@ -478,7 +507,7 @@ function insightIcon(icon: string | undefined): string {
             </div>
           </template>
         </ClientOnly>
-        <div v-if="!hasValidRoute" class="flex items-center justify-center" style="height: 240px; background: var(--color-surface-elevated)">
+        <div v-if="!hasValidRoute && !hasWifi" class="flex items-center justify-center" style="height: 240px; background: var(--color-surface-elevated)">
           <div class="text-center">
             <svg class="w-8 h-8 mx-auto mb-2" style="color: var(--color-text-secondary)" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -487,6 +516,19 @@ function insightIcon(icon: string | undefined): string {
           </div>
         </div>
       </div>
+
+        <p v-if="hasWifi" class="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-[11px]" style="color: var(--color-text-secondary)">
+          <span class="inline-flex items-center gap-1.5 font-semibold" style="color: #f472b6">
+            <span class="w-2.5 h-2.5 rounded-full" style="border: 1.5px dashed #f472b6" />Wi-Fi estimates
+          </span>
+          <span>
+            where Wi-Fi put the car while GPS had no fix:
+            <template v-if="wifiSummary.by.place">{{ wifiSummary.by.place }} scan{{ wifiSummary.by.place === 1 ? '' : 's' }} at {{ wifiSummary.names.join(', ') }} (place)</template><template v-if="wifiSummary.by.place && (wifiSummary.by.learned || wifiSummary.by.beacondb)"> · </template>
+            <template v-if="wifiSummary.by.learned">{{ wifiSummary.by.learned }} learned</template><template v-if="wifiSummary.by.learned && wifiSummary.by.beacondb"> · </template>
+            <template v-if="wifiSummary.by.beacondb">{{ wifiSummary.by.beacondb }} from beaconDB</template>.
+            Estimates only: the track, distance and speeds are GPS alone.
+          </span>
+        </p>
 
         <ClientOnly>
           <ChartsTripScrubber
@@ -652,6 +694,9 @@ function insightIcon(icon: string | undefined): string {
 
       <p v-if="attribution.length" class="text-[10px] mt-3 px-1" style="color: var(--color-text-secondary)">
         Place names: {{ attribution.join(' · ') }}
+      </p>
+      <p v-if="wifiAttribution.length" class="text-[10px] mt-1 px-1" style="color: var(--color-text-secondary)">
+        {{ wifiAttribution.join(' · ') }} (<a href="https://beacondb.net/" target="_blank" rel="noopener" class="underline-offset-2 hover:underline">beacondb.net</a>)
       </p>
     </template>
   </div>

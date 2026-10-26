@@ -99,9 +99,9 @@ you are on one). Light, dark and automatic themes are in the sidebar footer.
 | --- | --- | --- |
 | **Home** (`/`) | simple | Totals (trips, distance, drive time, top speed), a heat map of every drive, the last trip, device health, recent trips. Detailed views add engine highlights (peak boost, top RPM, air-fuel balance, fuel trims). |
 | **Trips** (`/trips`) | simple | Every drive, newest first, with search: free text over your notes, tags and the names of saved places a trip visited; filter by tag, bookmark or date range. |
-| **Trip** (`/trips/<id>`) | simple | One trip — an outing, which can span several power cycles of the dongle: route on a map coloured by speed (the dongle's GPS and the phone's combined, or either alone, or both lines over each other), playback scrubber, stops (with icons for the kind of place), GPS health, **GPS: device and phone** (how the two differed and how close each came to the car's own speed and distance), speed and elevation, estimated fuel use, "trip insights" cards, bookmark/tags/note, and **Save a picture**. The id is `<vehicle id>:<start in ms>`; an old link with a bare boot id still resolves to the trip that boot belongs to. |
+| **Trip** (`/trips/<id>`) | simple | One trip — an outing, which can span several power cycles of the dongle: route on a map coloured by speed (the dongle's GPS and the phone's combined, or either alone, or both lines over each other), playback scrubber, stops (with icons for the kind of place), GPS health, **GPS: device and phone** (how the two differed and how close each came to the car's own speed and distance), **Wi-Fi estimates** (hollow pink markers with accuracy circles where Wi-Fi scans put the car while GPS had no fix, from ten minutes before the trip, so a cold start from home shows; never part of the track, distance or speeds), speed and elevation, estimated fuel use, "trip insights" cards, bookmark/tags/note, and **Save a picture**. The id is `<vehicle id>:<start in ms>`; an old link with a bare boot id still resolves to the trip that boot belongs to. |
 | **Statistics** (`/stats`) | simple | Trips, distance, time driving and top speed for a week, month, quarter, year or custom range, compared with the period before, with a distance chart with no gaps. |
-| **Places** (`/places`) | simple | A map and list of where you stopped and where trips started and ended. Name them, pick a kind, confirm or remove the ones the system learned; export and import. |
+| **Places** (`/places`) | simple | A map and list of where you stopped and where trips started and ended. Name them, pick a kind, confirm or remove the ones the system learned; **add a place yourself** (click the map, enter coordinates or find an address), set Home in one click from the suggestion, change a radius, move or delete a place; attach the **Wi-Fi networks seen here**; turn beaconDB lookups on or off; export and import. |
 | **Your device** (`/system`) | simple | Battery, signal, temperature, storage, last contact, the uploads (bundles) that have arrived and the state of the store behind the site. |
 | **Phones** (`/phones`) | simple | The iPhones enrolled with the vehicle server: an **Add a phone** QR code, the list, revoking one, and a week of their activity (see [docs/auth.md](docs/auth.md#adding-a-phone)). |
 | **Security** (`/security`) | simple | Your passkeys, adding and removing them, a download of everything you made, restore from a file, the recent-activity trail, sign out. |
@@ -391,6 +391,8 @@ What leaves the machine, and when:
 | Map tiles (the area you are looking at) | CARTO basemaps (`basemaps.cartocdn.com`) | Maps on Home, a trip and Places | Not configurable. `NUXT_PUBLIC_CARTO_KEY` adds your key to the tile URL. |
 | Web fonts (Inter, JetBrains Mono) | Google Fonts | Every page load, from the browser | Not configurable today; the fonts are linked in `nuxt.config.ts`. |
 | Coordinates of a stop, to find its name | Overpass (OpenStreetMap) servers; Geoapify if `NUXT_GEOAPIFY_KEY` is set | In the background, once per new unknown spot (cached), never for a place you saved or that was learned | `NUXT_PLACES_EXTERNAL=false`. Cached names and a local Foursquare extract keep working. |
+| BSSIDs and signal strengths of a Wi-Fi scan the car took with no GPS fix (at least two access points; never a network name, a position, a time or anything about the car) | beaconDB (`api.beacondb.net`) | In the background, once per new set of access points (every answer, "not found" included, is cached), and only when neither a saved place nor the learned map knows them | Places page ▸ Wi-Fi positions, `NUXT_PLACES_BEACONDB=false`, or `NUXT_PLACES_EXTERNAL=false`. Nothing is ever submitted to beaconDB. |
+| An address you type on the Places page | Geoapify if `NUXT_GEOAPIFY_KEY` is set, else OpenStreetMap Nominatim | Only when you press Find | `NUXT_PLACES_EXTERNAL=false` (enter coordinates instead). |
 | Nothing | | Saving a picture of a trip | Nothing is sent: it is drawn in your browser with no tiles. |
 
 The place engine spaces its Overpass requests a few seconds apart, keeps within a daily Geoapify budget, and shows
@@ -460,7 +462,10 @@ used before anything else; otherwise the name comes from OpenStreetMap, Geoapify
 Foursquare extract, and is cached. A spot that appears on three or more trips with a specific name and a confidence
 of at least 0.5 is saved automatically as **learned**; edit or confirm it and it is yours; remove it and it is
 remembered as rejected so it is not learned again. Kinds (Home, Work, Gym, Food, Fuel and so on) pick the icon and
-rank the suggested names. The engine only ever *suggests* Home. Everything is in [docs/places.md](docs/places.md).
+rank the suggested names. The engine only ever *suggests* Home; accepting is one click, and there is one Home.
+**Add a place** puts one where you click, at coordinates you type or at an address you find. A saved place can carry
+the **Wi-Fi networks seen here** (BSSIDs only), so a scan with no GPS fix that hears one puts the car there; failing
+that, the store's learned access-point map, then beaconDB, estimate it. Everything is in [docs/places.md](docs/places.md).
 
 ## Two GPS tracks per trip
 
@@ -521,6 +526,7 @@ live in `/etc/cairn/ui.env`, never in this repository (`deploy/systemd/ui.env.ex
 | `NUXT_TSDB_URL` | `http://127.0.0.1:8480` | The `cairn-tsdb` store (loopback). |
 | `NUXT_CAIRN_LOCAL_URL` | empty | The vehicle server's loopback local API, for vehicle display names. Empty means ids only. |
 | `NUXT_PLACES_EXTERNAL` | `true` | Set to `false` to stop every lookup that sends coordinates off the machine. |
+| `NUXT_PLACES_BEACONDB` | `true` | Set to `false` to never look up Wi-Fi networks in beaconDB (the Places page can also turn it off). Off whenever `NUXT_PLACES_EXTERNAL=false`. |
 | `NUXT_PLACES_DATA_DIR` | `.data/places` (the deploy drop-in sets `/var/lib/cairn-ui`) | Where every store above lives. |
 | `NUXT_OVERPASS_URL` | two public Overpass servers, comma-separated | Overpass endpoints to try, in order. |
 | `NUXT_GEOAPIFY_KEY` | empty | Enables Geoapify lookups (free plan; the UI shows the required credit). |
@@ -544,17 +550,17 @@ its script header.
 
 ## API overview
 
-63 routes under `server/api`, listed in `tests/routes.json` (generated by `tests/routes.json.sh`; a unit test fails
+67 routes under `server/api`, listed in `tests/routes.json` (generated by `tests/routes.json.sh`; a unit test fails
 if it drifts from `server/api`). All need an identity except `/api/auth/*`, which checks inside each handler. Most
 accept `?vehicle=<32-hex id>`; the analysis routes answer for exactly one car and default to the most recently seen.
 
 | Area | Routes |
 | --- | --- |
-| Trips | `GET /api/trips`, `/api/trips/search`, `/api/trips/:tripId` and, under it, `events`, `fuel`, `gps-compare`, `image-data`, `insights`, `route`, `stops`, `telemetry`, `timeline`. `:tripId` is `<vehicle id>:<start in ms>`; a bare boot id resolves to its trip, and anything else is a 400 |
+| Trips | `GET /api/trips`, `/api/trips/search`, `/api/trips/:tripId` and, under it, `events`, `fuel`, `gps-compare`, `image-data`, `insights`, `route`, `stops`, `telemetry`, `timeline`, `wifi`. `:tripId` is `<vehicle id>:<start in ms>`; a bare boot id resolves to its trip, and anything else is a 400 |
 | Statistics and dashboard | `GET /api/stats/period`, `/api/dashboard/{stats,recent,highlights,device}`, `/api/heatmap` |
 | Analytics | `GET /api/analytics/{boost-curve,boost-detail,drive-summary,fuel-economy,fuel-health,imu,pulls,speed-agreement,telemetry,trim-map}` |
 | Device and store | `GET /api/device/{bundles,health,reproducibility,tsdb-status}`, `/api/vehicles`, `/api/snapshot` (Parquet pass-through from the store) |
-| Places | `GET /api/places`; `POST /api/places/saved`; `PATCH` and `DELETE /api/places/saved/:id`; `GET /api/places/saved/export`; `POST /api/places/saved/import` |
+| Places | `GET /api/places`; `POST /api/places/saved`; `PATCH` and `DELETE /api/places/saved/:id` (a `bssids` list attaches networks); `GET /api/places/saved/:id/networks`; `GET /api/places/saved/export`; `POST /api/places/saved/import`; `PATCH /api/places/settings`; `POST /api/places/geocode` |
 | Trip marks | `GET /api/annotations`; `GET`, `PUT`, `DELETE /api/annotations/:tripId`; `GET /api/annotations/export`; `POST /api/annotations/import` (a legacy export keyed by `boot_id` is still accepted) |
 | Phones | `GET /api/phones`, `/api/phones/activity`, `/api/phones/status`; `POST /api/phones/invite`; `POST /api/phones/:id/revoke` |
 | Your data | `GET /api/data/export`; `POST /api/data/import` |
